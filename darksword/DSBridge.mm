@@ -15,7 +15,9 @@
 #import <net/if.h>
 #import <notify.h>
 #import <os/lock.h>
+extern "C" {
 #include "darksword.h"
+}
 #import <os/log.h>
 
 #include <atomic>
