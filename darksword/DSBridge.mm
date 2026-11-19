@@ -887,12 +887,13 @@ typedef struct {
 // which makes UIView initialization abort SpringBoard under
 // CA_ASSERT_MAIN_THREAD_TRANSACTIONS. Build an NSInvocation on the call thread,
 // then synchronously ask NSObject to invoke it on SpringBoard's real main thread.
-static BOOL ds_remote_invoke_on_main_result(RemoteCall *process, uint64_t target,
-                                            uint64_t selector,
-                                            const DSRemoteArgument *arguments,
-                                            NSUInteger argumentCount,
-                                            void *result,
-                                            NSUInteger resultSize) {
+static BOOL ds_remote_invoke_on_main_result_ex(RemoteCall *process, uint64_t target,
+                                               uint64_t selector,
+                                               const DSRemoteArgument *arguments,
+                                               NSUInteger argumentCount,
+                                               void *result,
+                                               NSUInteger resultSize,
+                                               BOOL retainResult) {
     if (!process || !target || !selector || !process.trojanMem) return NO;
 
     uint64_t poolClass = ds_remote_class(process, "NSAutoreleasePool");
@@ -951,12 +952,39 @@ static BOOL ds_remote_invoke_on_main_result(RemoteCall *process, uint64_t target
         if (!process.trojanMem) return NO;
         if (![process remoteRead:resultScratch to:result size:resultSize]) return NO;
     }
+
+    // Factory methods such as +[UIImage imageWithData:] or -[UIView subviews]
+    // hand back an autoreleased object. The pool created above is drained in
+    // @finally, which happens *after* this block but *before* the caller sees
+    // the value, so any +1 must be taken here or the object is already freed by
+    // the time the caller touches it. That is what killed SpringBoard.
+    if (retainResult && result && resultSize >= sizeof(uint64_t)) {
+        uint64_t object = 0;
+        memcpy(&object, result, sizeof(object));
+        if (object) {
+            uint64_t retained = remote_msg(process, object,
+                                           ds_remote_sel(process, "retain"), 0, 0, 0, 0);
+            if (!retained || !process.trojanMem) {
+                memcpy(result, &retained, sizeof(retained));
+            }
+        }
+    }
     return YES;
     } @finally {
         if (process.trojanMem) {
             remote_msg(process, autoreleasePool, drainSelector, 0, 0, 0, 0);
         }
     }
+}
+
+static BOOL ds_remote_invoke_on_main_result(RemoteCall *process, uint64_t target,
+                                            uint64_t selector,
+                                            const DSRemoteArgument *arguments,
+                                            NSUInteger argumentCount,
+                                            void *result,
+                                            NSUInteger resultSize) {
+    return ds_remote_invoke_on_main_result_ex(process, target, selector, arguments,
+                                              argumentCount, result, resultSize, NO);
 }
 
 static BOOL ds_remote_invoke_on_main(RemoteCall *process, uint64_t target,
@@ -986,16 +1014,11 @@ static uint64_t ds_remote_get_retained_object_on_main(
     RemoteCall *process, uint64_t target, const char *selectorName,
     const DSRemoteArgument *arguments, NSUInteger argumentCount) {
     uint64_t result = 0;
-    BOOL invoked = ds_remote_invoke_on_main_result(
+    BOOL invoked = ds_remote_invoke_on_main_result_ex(
         process, target, ds_remote_sel(process, selectorName),
-        arguments, argumentCount, &result, sizeof(result));
+        arguments, argumentCount, &result, sizeof(result), YES);
     if (!invoked || !result || !process.trojanMem) return 0;
-
-    // Retain immediately after the synchronous main-thread return. This keeps
-    // factory results alive across later performSelector turns and prevents the
-    // dangling-object crash seen with the former UIColor factory result.
-    remote_msg(process, result, ds_remote_sel(process, "retain"), 0, 0, 0, 0);
-    return process.trojanMem ? result : 0;
+    return result;
 }
 
 static BOOL ds_remote_set_u64_on_main(RemoteCall *process, uint64_t target,
@@ -1114,11 +1137,43 @@ static void ds_remote_free(RemoteCall *process, uint64_t address) {
                                  argCount:1];
 }
 
+// Marks the ImGui path as "armed" before the remote views are built and only
+// clears it once the HUD is live. A leftover marker at startup therefore means
+// the previous attempt died mid-build, and the label renderer is used instead.
+static NSString *ds_imgui_arm_path(void) {
+    NSArray<NSString *> *paths = NSSearchPathForDirectoriesInDomains(
+        NSLibraryDirectory, NSUserDomainMask, YES);
+    NSString *library = paths.firstObject;
+    return library.length ? [library stringByAppendingPathComponent:@".darkspeed-imgui.armed"] : nil;
+}
+
+static BOOL ds_imgui_path_is_suspect(void) {
+    NSString *path = ds_imgui_arm_path();
+    return path.length && [[NSFileManager defaultManager] fileExistsAtPath:path];
+}
+
+static void ds_imgui_arm(BOOL armed) {
+    NSString *path = ds_imgui_arm_path();
+    if (!path.length) return;
+    if (armed) {
+        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } else {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    }
+}
+
 static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
-    // ImGui is the default renderer in this build; the label HUD stays as the
-    // automatic fallback when the panel renderer cannot produce pixels.
     NSNumber *value = preferences[HUDUserDefaultsKeyUsesImGuiRenderer];
-    return value ? value.boolValue : YES;
+    BOOL requested = value ? value.boolValue : YES;
+    if (!requested) return NO;
+
+    // A previous attempt that never completed means this device/build could not
+    // survive the ImGui path. Prefer a working label HUD over another respring.
+    if (ds_imgui_path_is_suspect()) {
+        ds_append_checkpoint(ds_localized(@"Previous ImGui attempt did not complete; using the label HUD this time"));
+        return NO;
+    }
+    return YES;
 }
 
 static float ds_panel_font_size(NSDictionary *preferences) {
@@ -1183,46 +1238,55 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
         return NO;
     }
 
-    uint64_t dataClass = ds_remote_class(process, "NSData");
     uint64_t alloc = ds_remote_sel(process, "alloc");
-    uint64_t initWithBytes = ds_remote_sel(process, "initWithBytes:length:");
-    if (!dataClass || !alloc || !initWithBytes) return NO;
-
-    uint64_t dataObject = remote_msg(process, dataClass, alloc, 0, 0, 0, 0);
-    if (!dataObject) return NO;
-    uint64_t data = remote_msg(process, dataObject, initWithBytes,
-                               g_remoteImageBuffer, (uint64_t)png.length, 0, 0);
-    if (!data) {
-        uint64_t release = ds_remote_sel(process, "release");
-        if (release) remote_msg(process, dataObject, release, 0, 0, 0, 0);
-        return NO;
-    }
-
-    DSRemoteArgument dataArg = {&data, sizeof(data)};
-    uint64_t image = ds_remote_get_retained_object_on_main(process,
-                                                           ds_remote_class(process, "UIImage"),
-                                                           "imageWithData:",
-                                                           &dataArg, 1);
     uint64_t release = ds_remote_sel(process, "release");
-    if (!image) {
-        // Drop our +1 on the NSData before failing out; the panel is refreshed
-        // once per second for the lifetime of the HUD, so any unbalanced
-        // allocation here becomes a steady leak inside SpringBoard.
-        if (release) remote_msg(process, data, release, 0, 0, 0, 0);
-        ds_set_error(ds_localized(@"ImGui panel upload failed: UIImage decode"));
+    uint64_t dataClass = ds_remote_class(process, "NSData");
+    uint64_t imageClass = ds_remote_class(process, "UIImage");
+    uint64_t initWithBytes = ds_remote_sel(process, "initWithBytes:length:");
+    uint64_t initWithData = ds_remote_sel(process, "initWithData:");
+    if (!alloc || !release || !dataClass || !imageClass ||
+        !initWithBytes || !initWithData) {
         return NO;
     }
 
-    ds_perform_on_springboard_main(process, g_remoteImageView,
-                                   ds_remote_sel(process, "setImage:"), image, YES);
-    // The image view retains the new image, so both the retained UIImage and
-    // the +1 NSData we allocated can be released right away.
-    if (release) {
-        remote_msg(process, image, release, 0, 0, 0, 0);
-        remote_msg(process, data, release, 0, 0, 0, 0);
+    // Both objects must be created with alloc/init so they are +1 and therefore
+    // outlive the autorelease pool that ds_remote_invoke_on_main_result drains
+    // before it returns. Factory methods (+imageWithData:) are released by that
+    // drain, and retaining them afterwards dereferenced freed memory — which is
+    // exactly what took SpringBoard down.
+    uint64_t data = remote_msg(process, dataClass, alloc, 0, 0, 0, 0);
+    if (!data) return NO;
+    data = remote_msg(process, data, initWithBytes,
+                      g_remoteImageBuffer, (uint64_t)png.length, 0, 0);
+    if (!data) {
+        ds_set_error(ds_localized(@"ImGui panel upload failed: NSData"));
+        return NO;
     }
-    return process.trojanMem != 0;
+
+    uint64_t image = remote_msg(process, imageClass, alloc, 0, 0, 0, 0);
+    if (!image) {
+        remote_msg(process, data, release, 0, 0, 0, 0);
+        return NO;
+    }
+    image = remote_msg(process, image, initWithData, data, 0, 0, 0);
+
+    BOOL decoded = image != 0 && process.trojanMem != 0;
+    if (decoded) {
+        ds_perform_on_springboard_main(process, g_remoteImageView,
+                                       ds_remote_sel(process, "setImage:"), image, YES);
+    } else {
+        ds_set_error(ds_localized(@"ImGui panel upload failed: PNG decode"));
+    }
+
+    // The view retains its image and the UIImage retains its data, so both of
+    // our +1 references can be dropped. A failed decode leaves `image` at 0 and
+    // only the NSData needs releasing.
+    if (image) remote_msg(process, image, release, 0, 0, 0, 0);
+    remote_msg(process, data, release, 0, 0, 0, 0);
+    return decoded;
 }
+
+static void ds_remove_springboard_hud(RemoteCall *process);
 
 // Panel geometry for the ImGui surface. Kept in one place so the create path
 // and the per-second update path cannot disagree about the window rect.
@@ -1358,7 +1422,14 @@ static uint64_t ds_create_springboard_imgui(RemoteCall *process) {
     g_focusUntil = CFAbsoluteTimeGetCurrent() + kDSHUDFocusDuration;
 
     if (!ds_update_imgui_panel(process, preferences)) {
-        ds_append_checkpoint(ds_localized(@"ImGui panel upload failed; keeping the empty panel"));
+        // The hierarchy exists but shows nothing. Tear it down so the caller can
+        // fall back to the label renderer instead of leaving a broken view on
+        // SpringBoard's window stack.
+        ds_append_checkpoint(ds_localized(@"ImGui panel upload failed; falling back to the label HUD"));
+        ds_remove_springboard_hud(process);
+        g_remoteImageView = 0;
+        g_imguiPathActive = NO;
+        return 0;
     }
     return imageView;
 }
@@ -1989,9 +2060,11 @@ static void ds_finish_enable(void) {
         ds_set_stage(ds_localized(@"Creating SpringBoard HUD"));
         if (ds_imgui_panel_enabled(ds_hud_preferences())) {
             g_imguiPathActive = YES;
+            ds_imgui_arm(YES);
             uint64_t imageView = ds_create_springboard_imgui(g_springBoard);
             if (!imageView) {
                 g_imguiPathActive = NO;
+                ds_imgui_arm(NO);
                 ds_append_checkpoint(ds_localized(@"ImGui panel unavailable; falling back to the label HUD"));
                 ds_set_stage(ds_localized(@"Falling back to the label HUD"));
             } else {
@@ -2019,6 +2092,8 @@ static void ds_finish_enable(void) {
     g_hudActive.store(true);
     g_dsRunning.store(false);
     g_dsProgress.store(1.0);
+    // The ImGui path survived: disarm the crash marker.
+    ds_imgui_arm(NO);
     ds_set_stage(ds_localized(@"SpringBoard HUD started"));
     ds_set_error(@"");
     ds_start_rate_timer();
