@@ -97,16 +97,10 @@
         [strongSelf->_rootViewController reloadMainButtonState];
     });
 
-    // Open the ImGui console once the app is actually on screen, so the overlay
-    // has a window scene to attach to. One dispatch hop keeps it off the launch
-    // critical path entirely.
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if (![defaults boolForKey:@"darkspeed.imgui.console.closed"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
-                      dispatch_get_main_queue(), ^{
-            DSImGuiOverlaySetVisible(YES);
-        });
-    }
+    // The ImGui console is opened only by an explicit user action (the ImGui
+    // button or darkspeed://imgui). Auto-opening it previously ran overlay
+    // initialisation right after launch and could terminate the app, so nothing
+    // ImGui-related may run unless the user asks for it.
 }
 
 @end

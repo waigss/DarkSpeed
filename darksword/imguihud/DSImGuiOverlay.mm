@@ -378,9 +378,20 @@ BOOL DSImGuiPanelRender(uint32_t widthPx, uint32_t heightPx, float pixelsPerPoin
     std::lock_guard<std::mutex> guard(renderer.lock);
     @autoreleasepool {
         if (renderer.failed) return NO;
-        if (!DSImGuiPanelRenderLocked(renderer, widthPx, heightPx, pixelsPerPoint,
-                                      fontSize, outBGRA, outLength)) {
-            if (DSImGuiLastError().length > 0) renderer.failed = true;
+        @try {
+            if (!DSImGuiPanelRenderLocked(renderer, widthPx, heightPx, pixelsPerPoint,
+                                          fontSize, outBGRA, outLength)) {
+                if (DSImGuiLastError().length > 0) renderer.failed = true;
+                return NO;
+            }
+        } @catch (NSException *exception) {
+            renderer.failed = true;
+            DSImGuiSetError([NSString stringWithFormat:
+                @"ImGui panel render failed: %@", exception.reason]);
+            return NO;
+        } @catch (...) {
+            renderer.failed = true;
+            DSImGuiSetError(@"ImGui panel render failed: non-ObjC exception");
             return NO;
         }
     }
@@ -393,8 +404,14 @@ BOOL DSImGuiPanelMeasure(float fontSize, float scale, float *widthPx, float *hei
     std::lock_guard<std::mutex> guard(renderer.lock);
     @autoreleasepool {
         if (renderer.failed) return NO;
-        if (!DSImGuiEnsureContext(renderer.state, fontSize, scale)) return NO;
-        DSImGuiHUDUi::Shared().PanelMeasure(fontSize, scale, widthPx, heightPx);
+        @try {
+            if (!DSImGuiEnsureContext(renderer.state, fontSize, scale)) return NO;
+            DSImGuiHUDUi::Shared().PanelMeasure(fontSize, scale, widthPx, heightPx);
+        } @catch (...) {
+            renderer.failed = true;
+            DSImGuiSetError(@"ImGui panel measure failed");
+            return NO;
+        }
     }
     return YES;
 }
@@ -550,6 +567,7 @@ static void DSImGuiFeedMouse(CGPoint point, bool down) {
 #pragma mark - Lifecycle
 
 static void DSImGuiOverlayTick(CADisplayLink *link) {
+    @try {
     std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
     DSImGuiOverlayState &state = OverlayState();
     if (!state.ctx.ctx) return;
@@ -566,7 +584,48 @@ static void DSImGuiOverlayTick(CADisplayLink *link) {
     state.lastTimestamp = now;
     DSImGuiHUDUi::Shared().Tick(now);
     DSImGuiOverlayRenderFrame(state);
+    } @catch (NSException *exception) {
+        // Stop the loop rather than repeating a failing frame forever.
+        DSImGuiBreadcrumb([[NSString stringWithFormat:@"tick: %@", exception.reason] UTF8String]);
+        DSImGuiSetError([NSString stringWithFormat:@"ImGui frame failed: %@", exception.reason]);
+        DSImGuiOverlayState &failed = OverlayState();
+        [failed.link invalidate];
+        failed.link = nil;
+        failed.proxy = nil;
+        failed.visible = false;
+        failed.wantsVisible = false;
+        if (failed.window) failed.window.hidden = YES;
+    } @catch (...) {
+        DSImGuiBreadcrumb("tick: unknown");
+        DSImGuiSetError(@"ImGui frame failed: non-ObjC exception");
+        DSImGuiOverlayState &failed = OverlayState();
+        [failed.link invalidate];
+        failed.link = nil;
+        failed.proxy = nil;
+        failed.visible = false;
+        failed.wantsVisible = false;
+        if (failed.window) failed.window.hidden = YES;
+    }
 }
+
+static void DSImGuiBreadcrumb(const char *stage) {
+    // Appended before each risky step so a hard crash still leaves the last
+    // reached stage on disk for the next launch to report.
+    static NSString *path = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *library = NSSearchPathForDirectoriesInDomains(
+            NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+        if (library.length) {
+            path = [library stringByAppendingPathComponent:@"DSImGui.stage"];
+        }
+    });
+    if (!path) return;
+    NSString *line = [NSString stringWithFormat:@"%s\n", stage ? stage : "?"];
+    [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
+static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible);
 
 void DSImGuiOverlaySetVisible(BOOL visible) {
     if (![NSThread isMainThread]) {
@@ -575,6 +634,27 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
         });
         return;
     }
+
+    // Any exception here (Metal, ImGui, layout) must not terminate the app.
+    @try {
+        DSImGuiOverlaySetVisibleUnsafe(visible);
+    } @catch (NSException *exception) {
+        DSImGuiBreadcrumb([[NSString stringWithFormat:@"exception: %@", exception.reason] UTF8String]);
+        DSImGuiSetError([NSString stringWithFormat:@"ImGui overlay failed: %@", exception.reason]);
+        OverlayState().visible = false;
+        OverlayState().wantsVisible = false;
+        if (OverlayState().window) OverlayState().window.hidden = YES;
+    } @catch (...) {
+        DSImGuiBreadcrumb("unknown exception");
+        DSImGuiSetError(@"ImGui overlay failed: non-ObjC exception while showing the console");
+        OverlayState().visible = false;
+        OverlayState().wantsVisible = false;
+        if (OverlayState().window) OverlayState().window.hidden = YES;
+    }
+}
+
+static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
+    DSImGuiBreadcrumb(visible ? "enter" : "enter-hide");
 
     DSImGuiOverlayState &state = OverlayState();
 
@@ -597,12 +677,18 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
     [NSUserDefaults.standardUserDefaults setBool:NO
                                           forKey:@"darkspeed.imgui.console.closed"];
 
+    DSImGuiBreadcrumb("context");
     if (!DSImGuiEnsureContextOverlay(state.ctx, 15.0f,
-                                     (float)UIScreen.mainScreen.scale)) return;
+                                     (float)UIScreen.mainScreen.scale)) {
+        DSImGuiBreadcrumb("context-failed");
+        return;
+    }
 
+    DSImGuiBreadcrumb("scene");
     UIWindowScene *scene = DSImGuiActiveWindowScene();
     if (!scene) {
         DSImGuiSetError(@"No active UIWindowScene for the ImGui overlay");
+        DSImGuiBreadcrumb("no-scene");
         return;
     }
 
@@ -660,8 +746,10 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
     io.DisplayFramebufferScale = ImVec2((float)scale, (float)scale);
     io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
 
+    DSImGuiBreadcrumb("show");
     [state.window setHidden:NO];
     state.visible = true;
+    DSImGuiBreadcrumb("visible");
 
     if (!state.link) {
         state.proxy = [DSImGuiDisplayLinkProxy proxyWithHandler:^{
