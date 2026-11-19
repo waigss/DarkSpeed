@@ -40,7 +40,7 @@ static std::atomic_bool g_dsRunning(false);
 static std::atomic_bool g_hudRequested(false);
 static std::atomic_bool g_hudActive(false);
 static std::atomic<double> g_dsProgress(0.0);
-
+#endif
 
 static NSString *ds_localized(NSString *key) {
     return [NSBundle.mainBundle localizedStringForKey:key value:key table:nil];
