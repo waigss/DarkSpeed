@@ -641,7 +641,7 @@ static BOOL _gImGuiSafeMode = NO;
         if ([RootViewController imguiSafeMode]) {
             [strongSelf->_authorLabel setText:NSLocalizedString(@"ImGui crashed during the last launch. Tap ImGui to retry.", nil)];
         } else if (!strongSelf->_isRemoteHUDActive && DSBridgeCompiledIn() && DSBridgeLastError().length > 0) {
-            [strongSelf->_authorLabel setText:bridgeError];
+            [strongSelf->_authorLabel setText:DSBridgeLastError()];
         } else {
             [strongSelf->_authorLabel setAttributedText:(strongSelf->_isRemoteHUDActive ? hintAttributedString : creditsAttributedString)];
         }
