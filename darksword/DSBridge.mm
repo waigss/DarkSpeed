@@ -1105,6 +1105,33 @@ static BOOL ds_apply_snapshot_container(RemoteCall *process, BOOL hideAtSnapshot
 // therefore never runs ImGui, and the remote side keeps the same UIWindow /
 // snapshot-hiding containers as the label path.
 
+// Remote malloc/free reached through remote_dlsym: the address is resolved in
+// SpringBoard, so the trampoline branches to something valid there. RemoteCall
+// only strips PAC bits from the pointer it receives and never rebases it.
+static uint64_t ds_remote_malloc(RemoteCall *process, uint64_t size) {
+    if (!process || !process.trojanMem || size == 0) return 0;
+    uint64_t address = 0;
+    if (!remote_dlsym(process, "malloc", &address) || !address) return 0;
+    uint64_t args[1] = {size};
+    return [process doRemoteCallStableWithTimeout:10
+                                      functionName:(char *)"malloc"
+                                   functionPointer:(void *)address
+                                            args:args
+                                        argCount:1];
+}
+
+static void ds_remote_free(RemoteCall *process, uint64_t address) {
+    if (!process || !process.trojanMem || address == 0) return;
+    uint64_t target = 0;
+    if (!remote_dlsym(process, "free", &target) || !target) return;
+    uint64_t args[1] = {address};
+    [process doRemoteCallStableWithTimeout:10
+                               functionName:(char *)"free"
+                            functionPointer:(void *)target
+                                     args:args
+                                 argCount:1];
+}
+
 static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
     NSNumber *value = preferences[HUDUserDefaultsKeyUsesImGuiRenderer];
     return value ? value.boolValue : YES;
