@@ -488,21 +488,21 @@ void DSImGuiOverlayRenderFrame(DSImGuiOverlayState &state) {
         state.winMaxY = root->Pos.y + root->Size.y;
     }
 
-    if (!drawData || drawData->CmdListsCount <= 0) {
-        // Nothing to draw. Presenting an empty command buffer is harmless, but
-        // skipping the encoder keeps a bad frame from touching the drawable.
-        [commandBuffer presentDrawable:drawable];
-        [commandBuffer commit];
-    } else {
+    id<MTLCommandBuffer> commandBuffer = [state.ctx.queue commandBuffer];
+    if (!commandBuffer) return;
+
+    if (drawData && drawData->CmdListsCount > 0) {
         id<MTLRenderCommandEncoder> encoder =
             [commandBuffer renderCommandEncoderWithDescriptor:pass];
         if (encoder) {
             ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, encoder);
             [encoder endEncoding];
         }
-        [commandBuffer presentDrawable:drawable];
-        [commandBuffer commit];
     }
+    // Present even with nothing to draw, so the transparent frame still flips
+    // and the layer does not stall waiting for a drawable.
+    [commandBuffer presentDrawable:drawable];
+    [commandBuffer commit];
 
     if (actions.applyRequested) {
         DSImGuiHUDUi::Shared().SavePrefs();
