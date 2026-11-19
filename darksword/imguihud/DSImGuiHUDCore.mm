@@ -480,26 +480,30 @@ void DSImGuiHUDUi::BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions
     if (_showMetrics) ImGui::ShowMetricsWindow(&_showMetrics);
 }
 
-void DSImGuiHUDUi::PanelMeasure(float fontSize, float *outWidth, float *outHeight) {
+void DSImGuiHUDUi::PanelMeasure(float fontSize, float scale, float *outWidthPx,
+                                 float *outHeightPx) {
     std::lock_guard<std::recursive_mutex> guard(_lock);
     LoadPrefs(false);
 
-    if (fontSize <= 0.0f) fontSize = 18.0f;
     if (fontSize < 9.0f) fontSize = 9.0f;
     if (fontSize > 34.0f) fontSize = 34.0f;
+    if (scale < 1.0f) scale = 1.0f;
+
+    const float pixelSize = fontSize * scale;
+    const float padX = 7.0f * scale;
+    const float padY = 4.0f * scale;
+    const float spacing = 2.0f * scale;
 
     ImGuiIO &io = ImGui::GetIO();
     ImFont *font = io.Fonts->Fonts.Size > 0 ? io.Fonts->Fonts[0] : nullptr;
-    if (!font) {
-        if (outWidth) *outWidth = 132.0f;
-        if (outHeight) *outHeight = 44.0f;
+    if (!font || font->FontSize <= 0.0f) {
+        if (outWidthPx) *outWidthPx = 132.0f * scale;
+        if (outHeightPx) *outHeightPx = 44.0f * scale;
         return;
     }
 
     char line1[96];
     char line2[96];
-    float lineHeight = fontSize;
-
     const char *downMark = _prefs.usesArrowPrefixes ? "↓" : "▼";
     const char *upMark = _prefs.usesArrowPrefixes ? "↑" : "▲";
 
@@ -520,39 +524,33 @@ void DSImGuiHUDUi::PanelMeasure(float fontSize, float *outWidth, float *outHeigh
         }
     }
 
-    ImVec2 size1 = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, line1);
-    ImVec2 size2 = line2[0] ? font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, line2) : ImVec2(0, 0);
-    lineHeight = size1.y > 0.0f ? size1.y : fontSize;
-
-    const float padX = 7.0f;
-    const float padY = 4.0f;
-    const float spacing = 2.0f;
+    ImVec2 size1 = font->CalcTextSizeA(pixelSize, FLT_MAX, 0.0f, line1);
+    ImVec2 size2 = line2[0] ? font->CalcTextSizeA(pixelSize, FLT_MAX, 0.0f, line2) : ImVec2(0.0f, 0.0f);
     bool twoLines = line2[0] != '\0';
 
     float width = (size1.x > size2.x ? size1.x : size2.x) + padX * 2.0f;
-    float height = lineHeight * (twoLines ? 2.0f : 1.0f) +
-                   (twoLines ? spacing : 0.0f) + padY * 2.0f;
+    float height = size1.y + (twoLines ? size2.y + spacing : 0.0f) + padY * 2.0f;
 
-    if (width < 64.0f) width = 64.0f;
-    if (height < 22.0f) height = 22.0f;
+    if (width < 64.0f * scale) width = 64.0f * scale;
+    if (height < 22.0f * scale) height = 22.0f * scale;
 
-    if (outWidth) *outWidth = ceilf(width);
-    if (outHeight) *outHeight = ceilf(height);
+    if (outWidthPx) *outWidthPx = ceilf(width);
+    if (outHeightPx) *outHeightPx = ceilf(height);
 }
 
-void DSImGuiHUDUi::BuildCompactPanel(bool inverted, float fontSize) {
+void DSImGuiHUDUi::BuildCompactPanel(bool inverted, float fontSize, float scale) {
     std::lock_guard<std::recursive_mutex> guard(_lock);
     LoadPrefs(false);
     Tick(CFAbsoluteTimeGetCurrent());
 
     if (fontSize < 9.0f) fontSize = 9.0f;
     if (fontSize > 34.0f) fontSize = 34.0f;
+    if (scale < 1.0f) scale = 1.0f;
 
     float panelWidth = 0.0f;
     float panelHeight = 0.0f;
-    PanelMeasure(fontSize, &panelWidth, &panelHeight);
+    PanelMeasure(fontSize, scale, &panelWidth, &panelHeight);
 
-    const ImGuiViewport *viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(panelWidth, panelHeight));
     ImGui::SetNextWindowBgAlpha(0.0f);
@@ -563,9 +561,9 @@ void DSImGuiHUDUi::BuildCompactPanel(bool inverted, float fontSize) {
                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                              ImGuiWindowFlags_NoResize;
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(7.0f, 4.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(7.0f * scale, 4.0f * scale));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 2.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 2.0f * scale));
     if (!ImGui::Begin("##darkspeed-panel", NULL, flags)) {
         ImGui::End();
         ImGui::PopStyleVar(3);
@@ -575,10 +573,10 @@ void DSImGuiHUDUi::BuildCompactPanel(bool inverted, float fontSize) {
     ImDrawList *drawList = ImGui::GetWindowDrawList();
     ImVec2 min = ImGui::GetWindowPos();
     ImVec2 max = ImVec2(min.x + ImGui::GetWindowWidth(), min.y + ImGui::GetWindowHeight());
-    ImU32 background = inverted ? IM_COL32(255, 255, 255, 214) : IM_COL32(20, 24, 26, 168);
-    drawList->AddRectFilled(min, max, background, 6.0f);
+    const float rounding = 6.0f * scale;
+    ImU32 background = inverted ? IM_COL32(255, 255, 255, 214) : IM_COL32(20, 24, 26, 170);
+    drawList->AddRectFilled(min, max, background, rounding);
 
-    ImGui::SetWindowFontScale(fontSize / 13.0f);
     ImGui::PushStyleColor(ImGuiCol_Text, inverted ? IM_COL32(12, 14, 16, 255)
                                                   : IM_COL32(255, 255, 255, 255));
 
@@ -602,5 +600,4 @@ void DSImGuiHUDUi::BuildCompactPanel(bool inverted, float fontSize) {
     ImGui::PopStyleColor();
     ImGui::End();
     ImGui::PopStyleVar(3);
-    (void)viewport;
 }

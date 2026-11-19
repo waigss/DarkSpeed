@@ -12,6 +12,7 @@
 #import <UIKit/UIKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <os/lock.h>
 #import <os/log.h>
 
 #include <cmath>
@@ -216,6 +217,38 @@ bool DSImGuiReadPixels(id<MTLCommandQueue> queue, id<MTLTexture> texture, void *
     return true;
 }
 
+bool DSImGuiEnsureContextOverlay(DSImGuiCtx &state, float pointSize, float scale) {
+    if (scale < 1.0f) scale = 1.0f;
+    if (!state.ctx) {
+        state.ctx = ImGui::CreateContext();
+        if (!state.ctx) {
+            DSImGuiSetError(@"ImGui context creation failed");
+            return false;
+        }
+        ImGui::SetCurrentContext(state.ctx);
+        DSImGuiHUDUi::ApplyDarkTheme();
+        // Bake the atlas for the screen scale, then scale it back down so the
+        // interactive window keeps working in points.
+        DSImGuiHUDUi::SetupFontAtlas(pointSize * scale);
+        ImGuiIO &io = ImGui::GetIO();
+        io.FontGlobalScale = 1.0f / scale;
+    }
+    ImGui::SetCurrentContext(state.ctx);
+    if (!state.device) {
+        state.device = MTLCreateSystemDefaultDevice();
+        if (!state.device) {
+            DSImGuiSetError(@"This device exposes no Metal device");
+            return false;
+        }
+        state.queue = [state.device newCommandQueue];
+        if (!state.queue) {
+            DSImGuiSetError(@"Metal command queue creation failed");
+            return false;
+        }
+    }
+    return DSImGuiEnsureBackend(state);
+}
+
 struct DSImGuiPanelRenderer {
     std::mutex lock;
     DSImGuiCtx state;
@@ -230,7 +263,9 @@ DSImGuiPanelRenderer &PanelRenderer(void) {
     return renderer;
 }
 
-bool DSImGuiEnsureContext(DSImGuiCtx &state, float pixelSize) {
+bool DSImGuiEnsureContext(DSImGuiCtx &state, float fontSize, float scale) {
+    if (scale < 1.0f) scale = 1.0f;
+    const float pixelSize = fontSize * scale;
     if (!state.ctx) {
         state.ctx = ImGui::CreateContext();
         if (!state.ctx) {
@@ -240,6 +275,12 @@ bool DSImGuiEnsureContext(DSImGuiCtx &state, float pixelSize) {
         ImGui::SetCurrentContext(state.ctx);
         DSImGuiHUDUi::ApplyDarkTheme();
         DSImGuiHUDUi::SetupFontAtlas(pixelSize);
+
+        // Panel renderer works purely in pixels: one ImGui unit is one device
+        // pixel and the atlas carries a matching glyph size.
+        ImGuiIO &io = ImGui::GetIO();
+        io.FontGlobalScale = 1.0f;
+        io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     }
     ImGui::SetCurrentContext(state.ctx);
     if (!state.device) {
@@ -258,10 +299,14 @@ bool DSImGuiEnsureContext(DSImGuiCtx &state, float pixelSize) {
 }
 
 bool DSImGuiPanelRenderLocked(DSImGuiPanelRenderer &renderer, uint32_t widthPx,
-                              uint32_t heightPx, float pixelsPerPoint, void *outBGRA,
-                              size_t outLength) {    if (widthPx == 0 || heightPx == 0 || !outBGRA) return false;
+                              uint32_t heightPx, float pixelsPerPoint, float fontSize,
+                              void *outBGRA, size_t outLength) {
+    if (widthPx == 0 || heightPx == 0 || !outBGRA) return false;
     if (pixelsPerPoint <= 0.0f) pixelsPerPoint = 1.0f;
-    if (!DSImGuiEnsureContext(renderer.state, 13.0f * pixelsPerPoint)) return false;
+    if (fontSize <= 0.0f) fontSize = 18.0f;
+
+    const DSImGuiHUDPrefs &prefs = DSImGuiHUDUi::Shared().Prefs();
+    if (!DSImGuiEnsureContext(renderer.state, fontSize, pixelsPerPoint)) return false;
 
     if (!renderer.texture || renderer.width != widthPx || renderer.height != heightPx) {
         MTLTextureDescriptor *descriptor =
@@ -281,8 +326,8 @@ bool DSImGuiPanelRenderLocked(DSImGuiPanelRenderer &renderer, uint32_t widthPx,
     }
 
     ImGuiIO &io = ImGui::GetIO();
-    io.DisplaySize = ImVec2((float)widthPx / pixelsPerPoint, (float)heightPx / pixelsPerPoint);
-    io.DisplayFramebufferScale = ImVec2(pixelsPerPoint, pixelsPerPoint);
+    io.DisplaySize = ImVec2((float)widthPx, (float)heightPx);
+    io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     io.DeltaTime = 1.0f / 30.0f;
     io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
     io.AddMouseButtonEvent(0, false);
@@ -296,10 +341,8 @@ bool DSImGuiPanelRenderLocked(DSImGuiPanelRenderer &renderer, uint32_t widthPx,
     ImGui_ImplMetal_NewFrame(pass);
     ImGui::NewFrame();
 
-    const DSImGuiHUDPrefs &prefs = DSImGuiHUDUi::Shared().Prefs();
-    float fontSize = prefs.usesCustomFontSize ? prefs.customFontSize
-                                              : (prefs.usesLargeFont ? 21.0f : 18.0f);
-    DSImGuiHUDUi::Shared().BuildCompactPanel(prefs.usesInvertedColor, fontSize);
+    ImGui::SetWindowFontScale(1.0f);
+    DSImGuiHUDUi::Shared().BuildCompactPanel(prefs.usesInvertedColor, fontSize, pixelsPerPoint);
 
     ImGui::Render();
     ImDrawData *drawData = ImGui::GetDrawData();
@@ -326,14 +369,14 @@ bool DSImGuiPanelRenderLocked(DSImGuiPanelRenderer &renderer, uint32_t widthPx,
 } // namespace
 
 BOOL DSImGuiPanelRender(uint32_t widthPx, uint32_t heightPx, float pixelsPerPoint,
-                        void *outBGRA, size_t outLength) {
+                        float fontSize, void *outBGRA, size_t outLength) {
     std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
     DSImGuiPanelRenderer &renderer = PanelRenderer();
     std::lock_guard<std::mutex> guard(renderer.lock);
     @autoreleasepool {
         if (renderer.failed) return NO;
         if (!DSImGuiPanelRenderLocked(renderer, widthPx, heightPx, pixelsPerPoint,
-                                      outBGRA, outLength)) {
+                                      fontSize, outBGRA, outLength)) {
             if (DSImGuiLastError().length > 0) renderer.failed = true;
             return NO;
         }
@@ -341,19 +384,20 @@ BOOL DSImGuiPanelRender(uint32_t widthPx, uint32_t heightPx, float pixelsPerPoin
     return YES;
 }
 
-BOOL DSImGuiPanelMeasure(float fontSize, float *width, float *height) {
+BOOL DSImGuiPanelMeasure(float fontSize, float scale, float *widthPx, float *heightPx) {
     std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
     DSImGuiPanelRenderer &renderer = PanelRenderer();
     std::lock_guard<std::mutex> guard(renderer.lock);
     @autoreleasepool {
         if (renderer.failed) return NO;
-        if (!DSImGuiEnsureContext(renderer.state, fontSize)) return NO;
-        DSImGuiHUDUi::Shared().PanelMeasure(fontSize, width, height);
+        if (!DSImGuiEnsureContext(renderer.state, fontSize, scale)) return NO;
+        DSImGuiHUDUi::Shared().PanelMeasure(fontSize, scale, widthPx, heightPx);
     }
     return YES;
 }
 
-NSData *DSImGuiPanelRenderPNG(float widthPoints, float heightPoints, float scale) {
+NSData *DSImGuiPanelRenderPNG(float widthPoints, float heightPoints, float scale,
+                              float fontSize) {
     std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
     if (widthPoints < 8.0f) widthPoints = 8.0f;
     if (heightPoints < 8.0f) heightPoints = 8.0f;
@@ -368,7 +412,7 @@ NSData *DSImGuiPanelRenderPNG(float widthPoints, float heightPoints, float scale
     }
 
     NSMutableData *pixels = [NSMutableData dataWithLength:length];
-    if (!DSImGuiPanelRender(widthPx, heightPx, scale, pixels.mutableBytes, length)) {
+    if (!DSImGuiPanelRender(widthPx, heightPx, scale, fontSize, pixels.mutableBytes, length)) {
         return nil;
     }
 
@@ -532,7 +576,8 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
 
     if (state.visible) return;
 
-    if (!DSImGuiEnsureContext(state.ctx, 15.0f)) return;
+    if (!DSImGuiEnsureContextOverlay(state.ctx, 15.0f,
+                                     (float)UIScreen.mainScreen.scale)) return;
 
     UIWindowScene *scene = DSImGuiActiveWindowScene();
     if (!scene) {

@@ -26,10 +26,12 @@ OBJC_EXTERN BOOL DSImGuiOverlayIsVisible(void);
 /// fills DSImGuiLastError() when the renderer is unavailable.
 OBJC_EXTERN NSData * _Nullable DSImGuiPanelRenderPNG(float widthPoints,
                                                      float heightPoints,
-                                                     float scale);
+                                                     float scale,
+                                                     float fontSize);
 
-/// Point size the compact panel wants for the requested font size.
-OBJC_EXTERN BOOL DSImGuiPanelMeasure(float fontSize, float *width, float *height);
+/// Pixel size the compact panel wants for the requested font size and scale.
+OBJC_EXTERN BOOL DSImGuiPanelMeasure(float fontSize, float scale,
+                                     float *widthPx, float *heightPx);
 
 /// Last renderer error, empty while the renderers are healthy.
 OBJC_EXTERN NSString *DSImGuiLastError(void);

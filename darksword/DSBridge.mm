@@ -1113,7 +1113,7 @@ static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
     return value ? value.boolValue : YES;
 }
 
-static CGSize ds_remote_panel_size(NSDictionary *preferences) {
+static float ds_panel_font_size(NSDictionary *preferences) {
     float fontSize;
     if ([preferences[HUDUserDefaultsKeyUsesCustomFontSize] boolValue]) {
         fontSize = [preferences[HUDUserDefaultsKeyRealCustomFontSize] floatValue];
@@ -1122,24 +1122,37 @@ static CGSize ds_remote_panel_size(NSDictionary *preferences) {
     }
     if (fontSize < 9.0f) fontSize = 9.0f;
     if (fontSize > 34.0f) fontSize = 34.0f;
+    return fontSize;
+}
 
-    float width = 120.0f;
-    float height = 32.0f;
-    if (!DSImGuiPanelMeasure(fontSize, &width, &height)) {
-        return CGSizeMake(120.0, 40.0);
+static CGFloat ds_panel_scale(void) {
+    CGFloat scale = UIScreen.mainScreen.scale;
+    return scale >= 1.0 ? scale : 2.0;
+}
+
+// Point size the SpringBoard window needs for the rendered ImGui panel.
+static CGSize ds_remote_panel_size(NSDictionary *preferences) {
+    const float fontSize = ds_panel_font_size(preferences);
+    const float scale = (float)ds_panel_scale();
+
+    float widthPx = 132.0f * scale;
+    float heightPx = 44.0f * scale;
+    if (!DSImGuiPanelMeasure(fontSize, scale, &widthPx, &heightPx)) {
+        return CGSizeMake(132.0, 44.0);
     }
-    return CGSizeMake(ceil(width), ceil(height));
+    return CGSizeMake(ceil(widthPx / scale), ceil(heightPx / scale));
 }
 
 // Uploads one rendered ImGui frame into the SpringBoard image view.
 static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences) {
     if (!process || !g_remoteImageView) return NO;
 
-    CGFloat scale = UIScreen.mainScreen.scale;
-    if (scale < 1.0) scale = 2.0;
+    const CGFloat scale = ds_panel_scale();
     CGSize points = ds_remote_panel_size(preferences);
+    const float fontSize = ds_panel_font_size(preferences);
 
-    NSData *png = DSImGuiPanelRenderPNG((float)points.width, (float)points.height, (float)scale);
+    NSData *png = DSImGuiPanelRenderPNG((float)points.width, (float)points.height,
+                                        (float)scale, fontSize);
     if (png.length == 0) {
         NSString *error = DSImGuiLastError();
         ds_set_error([NSString stringWithFormat:

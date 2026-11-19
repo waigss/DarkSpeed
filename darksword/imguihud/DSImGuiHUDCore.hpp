@@ -69,8 +69,9 @@ public:
     void BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions *actions);
 
     /// Builds the compact one/two line panel used by the remote renderer.
-    /// Coordinates are in ImGui space; the caller sets DisplaySize.
-    void BuildCompactPanel(bool inverted, float fontSize);
+    /// The panel ImGui context works in pixels: DisplaySize must be the pixel
+    /// size and the atlas must be loaded at fontSize * scale.
+    void BuildCompactPanel(bool inverted, float fontSize, float scale);
 
     const DSImGuiHUDPrefs &Prefs() const { return _prefs; }
     DSImGuiHUDPrefs &MutablePrefs() { return _prefs; }
@@ -87,8 +88,8 @@ public:
     /// True when the loaded atlas carries the solid triangle/arrow glyphs.
     static bool GlyphsAvailable();
 
-    /// Point size the compact panel needs for the given font size.
-    static void PanelMeasure(float fontSize, float *width, float *height);
+    /// Pixel size the compact panel needs for the given font size and scale.
+    void PanelMeasure(float fontSize, float scale, float *widthPx, float *heightPx);
 
     /// DarkSpeed dark theme, applied to the current ImGui context.
     static void ApplyDarkTheme();
