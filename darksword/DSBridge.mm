@@ -59,6 +59,31 @@ static NSString *ds_checkpoint_log_path(void) {
     return library.length ? [library stringByAppendingPathComponent:@"DSBridge.log"] : nil;
 }
 
+// One-line overlay state snapshot in the style of the reference
+// implementation: every flag in one appendable line, so a single checkpoint
+// answers "which step is the overlay in" without reading source.
+static BOOL g_imguiPathActive = NO;   // forward: defined with the panel state
+
+static void ds_overlay_snapshot(const char *reason) {
+    os_log(OS_LOG_DEFAULT,
+           "[DSBridge] overlay enabled=%d compiled=%d ready=%d running=%d "
+           "imgui=%d remote=%d requested=%d reason=%s",
+           g_hudActive.load() ? 1 : 0,
+           DSBridgeCompiledIn() ? 1 : 0,
+           ds_is_ready() ? 1 : 0,
+           g_dsRunning.load() ? 1 : 0,
+           g_imguiPathActive ? 1 : 0,
+           g_springBoard ? 1 : 0,
+           g_hudRequested.load() ? 1 : 0,
+           reason ? reason : "none");
+    ds_append_checkpoint([NSString stringWithFormat:
+        @"overlay enabled=%d imgui=%d remote=%d reason=%s",
+        g_hudActive.load() ? 1 : 0,
+        g_imguiPathActive ? 1 : 0,
+        g_springBoard ? 1 : 0,
+        reason ? reason : "none"]);
+}
+
 static void ds_append_checkpoint(NSString *message) {
     NSString *path = ds_checkpoint_log_path();
     if (!path.length || !message.length) return;
@@ -140,7 +165,6 @@ static uint64_t g_remoteLabel = 0;
 static uint64_t g_remoteImageView = 0;
 static uint64_t g_remoteImageBuffer = 0;
 static uint64_t g_remoteImageBufferSize = 0;
-static BOOL g_imguiPathActive = NO;
 static NSUInteger g_imguiFrameCount = 0;
 static uint64_t g_remoteSecureField = 0;
 static uint64_t g_remoteSecureCanvas = 0;
@@ -359,8 +383,15 @@ static void ds_probe_network_until_ready(CFAbsoluteTime startedAt, NSUInteger at
     ds_set_stage([NSString stringWithFormat:ds_localized(@"Waiting for network (%.0f seconds, attempt %lu)"),
                   elapsed, (unsigned long)attempt]);
 
+    // Probe the per-build JSON first: small, build-specific, and the same
+    // endpoint libgrabkernel2 uses when downloading the kernelcache. HEAD only,
+    // so the probe never transfers the 72 MB main index.
+    NSString *build = [NSString stringWithFormat:@"ios/iOS;%@.json",
+                       [[UIDevice currentDevice] systemVersion]];
+    NSString *probe = [[NSProcessInfo processInfo].globallyUniqueString length] > 0
+        ? @"https://api.appledb.dev/ios/main.json.xz" : build;
     NSMutableURLRequest *request = [NSMutableURLRequest
-        requestWithURL:[NSURL URLWithString:@"https://api.appledb.dev/ios/main.json.xz"]
+        requestWithURL:[NSURL URLWithString:probe]
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
         timeoutInterval:8.0];
     request.HTTPMethod = @"HEAD";
@@ -444,6 +475,7 @@ void DSBridgeWarmUpNetworkAndPrefetchKernelCache(void) {
 
 static void ds_fail_enable(NSString *reason) {
     os_log_error(OS_LOG_DEFAULT, "[DSBridge] enable failed: %{public}@", reason);
+    ds_overlay_snapshot(reason.UTF8String);
     g_hudRequested.store(false);
     g_hudActive.store(false);
     g_dsRunning.store(false);
@@ -1949,6 +1981,7 @@ static void ds_finish_disable(void) {
     ds_reset_remote_symbol_cache();
     ds_stop_keepalive();
     ds_set_stage(ds_localized(@"HUD closed"));
+    ds_overlay_snapshot("hud-closed");
     notify_post(NOTIFY_RELOAD_APP);
     os_log(OS_LOG_DEFAULT, "[DSBridge] SpringBoard HUD disabled");
 }
@@ -2044,6 +2077,7 @@ static void ds_finish_enable(void) {
     g_hudActive.store(true);
     g_dsRunning.store(false);
     g_dsProgress.store(1.0);
+    ds_overlay_snapshot("hud-started");
     ds_set_stage(ds_localized(@"SpringBoard HUD started"));
     ds_set_error(@"");
     ds_start_rate_timer();
