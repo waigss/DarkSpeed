@@ -569,9 +569,10 @@ static void DSImGuiFeedMouse(CGPoint point, bool down) {
 // UI has appeared. A leftover marker therefore means the previous launch died
 // while ImGui was initialising, and this launch skips ImGui entirely (safe
 // mode) until the user explicitly retries from the main screen.
-static NSString *DSImGuiCrashMarkerPath(void) {  // file-scope only
-    return [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES)
-        firstObject stringByAppendingPathComponent:@"DSImGui.launching"];
+static NSString *DSImGuiCrashMarkerPath(void) {
+    NSString *library = NSSearchPathForDirectoriesInDomains(
+        NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    return [library stringByAppendingPathComponent:@"DSImGui.launching"];
 }
 
 BOOL DSImGuiInSafeMode(void) {
@@ -722,10 +723,7 @@ static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
                     return;
                 }
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    OverlayState().ctx = warm.ctx;
-                    OverlayState().device = warm.device;
-                    OverlayState().queue = warm.queue;
-                    OverlayState().metalReady = warm.metalReady;
+                    OverlayState().ctx = warm;
                     OverlayState().warmedUp = YES;
                     DSImGuiBreadcrumb("warmup-done");
                     if (OverlayState().wantsVisible) DSImGuiOverlaySetVisible(YES);
