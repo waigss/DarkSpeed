@@ -607,8 +607,9 @@ static void DSImGuiBreadcrumb(const char *stage) {
     // Keep roughly the last 100 entries.
     NSArray *lines = [existing componentsSeparatedByString:@"\n"];
     if (lines.count > 100) {
-        existing = [[lines subarrayWithIndex:NSMakeRange(lines.count - 100, 100)]
-            componentsJoinedByString:@"\n"];
+        NSArray *tail = [lines subarrayWithRange:
+            NSMakeRange(lines.count - 100, 100)];
+        existing = [tail componentsJoinedByString:@"\n"];
     }
     NSString *line = [NSString stringWithFormat:@"%@ %s\n",
                       [NSDate date], stage ? stage : "?"];

@@ -1158,8 +1158,9 @@ static void ds_imgui_stage(NSString *stage) {
                                                       error:nil] ?: @"";
     NSArray *lines = [existing componentsSeparatedByString:@"\n"];
     if (lines.count > 100) {
-        existing = [[lines subarrayWithIndex:NSMakeRange(lines.count - 100, 100)]
-            componentsJoinedByString:@"\n"];
+        NSArray *tail = [lines subarrayWithRange:
+            NSMakeRange(lines.count - 100, 100)];
+        existing = [tail componentsJoinedByString:@"\n"];
     }
     NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], stage];
     NSMutableString *next = [existing mutableCopy];
