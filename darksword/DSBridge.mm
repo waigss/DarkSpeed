@@ -139,7 +139,6 @@ static uint64_t g_remoteLabel = 0;
 static uint64_t g_remoteImageView = 0;
 static uint64_t g_remoteImageBuffer = 0;
 static uint64_t g_remoteImageBufferSize = 0;
-static uint64_t g_remoteImage = 0;
 static BOOL g_imguiPathActive = NO;
 static NSUInteger g_imguiFrameCount = 0;
 static uint64_t g_remoteSecureField = 0;
@@ -1195,15 +1194,24 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
                                                            ds_remote_class(process, "UIImage"),
                                                            "imageWithData:",
                                                            &dataArg, 1);
+    uint64_t release = ds_remote_sel(process, "release");
     if (!image) {
+        // Drop our +1 on the NSData before failing out; the panel is refreshed
+        // once per second for the lifetime of the HUD, so any unbalanced
+        // allocation here becomes a steady leak inside SpringBoard.
+        if (release) remote_msg(process, data, release, 0, 0, 0, 0);
         ds_set_error(ds_localized(@"ImGui panel upload failed: UIImage decode"));
         return NO;
     }
 
     ds_perform_on_springboard_main(process, g_remoteImageView,
                                    ds_remote_sel(process, "setImage:"), image, YES);
-    uint64_t release = ds_remote_sel(process, "release");
-    if (release) remote_msg(process, image, release, 0, 0, 0, 0);
+    // The image view retains the new image, so both the retained UIImage and
+    // the +1 NSData we allocated can be released right away.
+    if (release) {
+        remote_msg(process, image, release, 0, 0, 0, 0);
+        remote_msg(process, data, release, 0, 0, 0, 0);
+    }
     return process.trojanMem != 0;
 }
 
@@ -1880,7 +1888,6 @@ static void ds_finish_disable(void) {
     g_remoteImageView = 0;
     g_remoteImageBuffer = 0;
     g_remoteImageBufferSize = 0;
-    g_remoteImage = 0;
     g_remoteSecureField = 0;
     g_remoteSecureCanvas = 0;
     g_remoteWindow = 0;
