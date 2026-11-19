@@ -77,8 +77,9 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
         [self loadUserDefaults:YES];
         [self reloadMainButtonState];
 #if USE_DARKSWORD
-        if (DSBridgeLastError().length > 0) {
-            [self showDSFailure:DSBridgeLastError()];
+        NSString *bridgeError = DSBridgeLastError();
+        if (bridgeError.length > 0) {
+            [self showDSFailure:bridgeError];
             [self.backgroundView setUserInteractionEnabled:YES];
         }
 #endif
@@ -329,6 +330,13 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"ImGui Console", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             DSImGuiOverlaySetVisible(!DSImGuiOverlayIsVisible());
         }]];
+#if USE_DARKSWORD
+        [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Clear Kernelcache", nil) style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
+            // Drops the cached kernelcache plus its symbol offsets so the next
+            // enable re-downloads and re-parses instead of reusing a bad file.
+            DSBridgeClearKernelCacheAndRetry();
+        }]];
+#endif
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Reset Settings", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [self resetUserDefaults];
         }]];

@@ -450,6 +450,10 @@ void DSImGuiHUDUi::BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions
             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 120, 120, 255));
             ImGui::TextWrapped("%s", status.error);
             ImGui::PopStyleColor();
+            ImGui::SetItemTooltip("System data: %s", status.error);
+            if (ImGui::Button("Clear kernelcache & retry", ImVec2(-1.0f, 0.0f))) {
+                actions->clearCacheRequested = true;
+            }
         }
         if (!status.hudActive) {
             if (ImGui::Button("Start SpringBoard HUD", ImVec2(210.0f, 0.0f))) {
@@ -462,6 +466,21 @@ void DSImGuiHUDUi::BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions
         }
         ImGui::SameLine();
         if (ImGui::Button("Close overlay")) actions->closeRequested = true;
+    }
+
+    if (ImGui::CollapsingHeader("Diagnostics")) {
+        ImGui::TextWrapped("stage: %s", status.stage[0] ? status.stage : "-");
+        if (status.error[0]) {
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 150, 150, 255));
+            ImGui::TextWrapped("error: %s", status.error);
+            ImGui::PopStyleColor();
+            if (ImGui::Button("Copy error##dscopy")) {
+                ImGui::SetClipboardText(status.error);
+            }
+        } else {
+            ImGui::TextDisabled("no error reported");
+        }
+        ImGui::TextDisabled("Documents/kernelcache is re-downloaded when cleared.");
     }
 
     if (ImGui::CollapsingHeader("Tools")) {

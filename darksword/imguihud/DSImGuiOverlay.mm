@@ -504,6 +504,9 @@ void DSImGuiOverlayRenderFrame(DSImGuiOverlayState &state) {
     if (actions.stopHUDRequested) {
         SetHUDEnabled(NO);
     }
+    if (actions.clearCacheRequested) {
+        DSBridgeClearKernelCacheAndRetry();
+    }
     if (actions.closeRequested) {
         dispatch_async(dispatch_get_main_queue(), ^{
             DSImGuiOverlaySetVisible(NO);

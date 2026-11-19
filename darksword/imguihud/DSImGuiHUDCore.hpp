@@ -50,6 +50,7 @@ struct DSImGuiHUDActions {
     bool applyRequested;
     bool startHUDRequested;
     bool stopHUDRequested;
+    bool clearCacheRequested;
     bool openDemoRequested;
     bool prefsDirty;
 };

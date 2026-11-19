@@ -290,7 +290,16 @@ static void ds_start_kernel_prefetch(BOOL retryFailed) {
             ds_set_error(@"");
             ds_set_stage(ds_localized(@"Kernelcache cached"));
         } else {
-            os_log_error(OS_LOG_DEFAULT, "[DSBridge] kernelcache prefetch failed");
+            const char *detail = dlkcache_last_error();
+            NSString *reason = (detail && detail[0])
+                ? [NSString stringWithUTF8String:detail] : @"";
+            os_log_error(OS_LOG_DEFAULT, "[DSBridge] kernelcache prefetch failed: %{public}@", reason);
+            // Keep the detail where the controller can show it: without this the
+            // UI only had a generic "network may still be pending" hint.
+            if (reason.length > 0) {
+                ds_set_error([NSString stringWithFormat:
+                    ds_localized(@"System data unavailable: %@"), reason]);
+            }
             if (g_networkWarmupState.load() == 1) {
                 ds_set_stage(ds_localized(@"Requesting network access"));
             } else {
@@ -1928,8 +1937,18 @@ static void ds_finish_enable(void) {
     ds_post_progress();
     if (!ds_wait_for_kernel_prefetch(240.0, YES)) {
         NSString *preparationError = DSBridgeLastError();
-        ds_fail_enable(preparationError.length > 0 ? preparationError :
-            ds_localized(@"Kernelcache download or parsing failed. Network access may still be pending. Check network access and retry; if it still fails, reinstall over the existing app. Restart the device only as a last resort."));
+        if (preparationError.length == 0) {
+            const char *detail = dlkcache_last_error();
+            if (detail && detail[0]) {
+                preparationError = [NSString stringWithFormat:
+                    ds_localized(@"System data unavailable: %@"),
+                    [NSString stringWithUTF8String:detail]];
+            }
+        }
+        if (preparationError.length == 0) {
+            preparationError = ds_localized(@"System data unavailable: no detail reported. Check network access and retry; if it still fails, reinstall over the existing app.");
+        }
+        ds_fail_enable(preparationError);
         return;
     }
 
@@ -2007,6 +2026,21 @@ static void ds_finish_enable(void) {
     notify_post(NOTIFY_LAUNCHED_HUD);
     ds_post_progress();
     os_log(OS_LOG_DEFAULT, "[DSBridge] SpringBoard HUD active (SpringBoard pid=%d)", g_springBoard.pid);
+}
+
+void DSBridgeClearKernelCacheAndRetry(void) {
+    dispatch_async(ds_bridge_queue(), ^{
+        @autoreleasepool {
+            os_log(OS_LOG_DEFAULT, "[DSBridge] clearing cached kernelcache for a retry");
+            clearkerncachedata();
+            clearkernelcachelog();
+            g_kernelPrefetchState.store(0);
+            g_networkWarmupState.store(0);
+            ds_set_error(@"");
+            ds_set_stage(ds_localized(@"Waiting to start"));
+            ds_post_progress();
+        }
+    });
 }
 
 BOOL DSBridgeSetHUDEnabled(BOOL enabled) {

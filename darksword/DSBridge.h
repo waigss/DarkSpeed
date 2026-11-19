@@ -28,6 +28,10 @@ OBJC_EXTERN BOOL DSBridgeBootstrap(void);
 /// Adopt KRW sockets handed over through DS_HELPER_* / DS_* environment values.
 OBJC_EXTERN BOOL DSBridgeAdoptFromEnvironment(void);
 
+/// Drop any cached kernelcache plus its symbol offsets so the next enable
+/// re-downloads and re-parses. Used by the UI's "clear cache" action.
+OBJC_EXTERN void DSBridgeClearKernelCacheAndRetry(void);
+
 /// Create or remove the HUD directly inside SpringBoard using RemoteCall.
 /// Returns YES if the bridge handled the request (caller should return).
 /// Returns NO to fall through to the stock TrollStore persona spawn.
