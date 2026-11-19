@@ -42,6 +42,13 @@ mkdir -p "$temporary_dir/Payload" "$package_dir"
 cp -R "$application_path" "$temporary_dir/Payload/DarkSpeed.app"
 (cd "$temporary_dir" && /usr/bin/zip -qry "$package_path" Payload)
 
+(
+    cd "$package_dir"
+    /usr/bin/shasum -a 256 "$(basename "$package_path")" | /usr/bin/awk '{ print $1 }' >"$(basename "$package_path").sha256"
+)
+
+/usr/bin/du -h "$package_path"
+
 if [ "${DARKSPEED_UNSIGNED:-0}" = "1" ]; then
     echo "Wrote $package_path (unsigned; sign it before installation)"
 else

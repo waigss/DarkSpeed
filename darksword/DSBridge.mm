@@ -18,6 +18,7 @@
 #import <os/log.h>
 
 #include <atomic>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -107,6 +108,7 @@ static void ds_set_error(NSString *message) {
 #if USE_DARKSWORD
 
 #import "DSRemoteCall.h"
+#import "DSImGuiOverlay.h"
 
 // These vendored headers are plain C/Objective-C. Keep C linkage from this .mm.
 extern "C" {
@@ -134,6 +136,12 @@ static uint64_t g_remoteContainer = 0;
 static uint64_t g_remoteBlurView = 0;
 static uint64_t g_remoteBlurEffect = 0;
 static uint64_t g_remoteLabel = 0;
+static uint64_t g_remoteImageView = 0;
+static uint64_t g_remoteImageBuffer = 0;
+static uint64_t g_remoteImageBufferSize = 0;
+static uint64_t g_remoteImage = 0;
+static BOOL g_imguiPathActive = NO;
+static NSUInteger g_imguiFrameCount = 0;
 static uint64_t g_remoteSecureField = 0;
 static uint64_t g_remoteSecureCanvas = 0;
 static uint64_t g_remoteWindow = 0;
@@ -1067,6 +1075,264 @@ static BOOL ds_apply_snapshot_container(RemoteCall *process, BOOL hideAtSnapshot
     return !hideAtSnapshot || canHide;
 }
 
+// MARK: - ImGui / IOSurface panel path
+//
+// The ImGui scene is rasterised inside DarkSpeed's own process (Metal), encoded
+// as PNG and pushed into SpringBoard as an NSData-backed UIImage. SpringBoard
+// therefore never runs ImGui, and the remote side keeps the same UIWindow /
+// snapshot-hiding containers as the label path.
+
+static uint64_t ds_remote_malloc(RemoteCall *process, uint64_t size) {
+    if (!process || size == 0) return 0;
+    void *symbol = dlsym(RTLD_DEFAULT, "malloc");
+    if (!symbol) return 0;
+    uint64_t args[1] = {size};
+    return [process doRemoteCallStableWithTimeout:10
+                                      functionName:(char *)"malloc"
+                                   functionPointer:symbol
+                                            args:args
+                                        argCount:1];
+}
+
+static void ds_remote_free(RemoteCall *process, uint64_t address) {
+    if (!process || address == 0) return;
+    void *symbol = dlsym(RTLD_DEFAULT, "free");
+    if (!symbol) return;
+    uint64_t args[1] = {address};
+    [process doRemoteCallStableWithTimeout:10
+                               functionName:(char *)"free"
+                            functionPointer:symbol
+                                     args:args
+                                 argCount:1];
+}
+
+static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
+    // ImGui is the default renderer in this build; the label HUD stays as the
+    // automatic fallback when the panel renderer cannot produce pixels.
+    NSNumber *value = preferences[HUDUserDefaultsKeyUsesImGuiRenderer];
+    return value ? value.boolValue : YES;
+}
+
+static CGSize ds_remote_panel_size(NSDictionary *preferences) {
+    float fontSize;
+    if ([preferences[HUDUserDefaultsKeyUsesCustomFontSize] boolValue]) {
+        fontSize = [preferences[HUDUserDefaultsKeyRealCustomFontSize] floatValue];
+    } else {
+        fontSize = [preferences[HUDUserDefaultsKeyUsesLargeFont] boolValue] ? 21.0f : 18.0f;
+    }
+    if (fontSize < 9.0f) fontSize = 9.0f;
+    if (fontSize > 34.0f) fontSize = 34.0f;
+
+    float width = 120.0f;
+    float height = 32.0f;
+    if (!DSImGuiPanelMeasure(fontSize, &width, &height)) {
+        return CGSizeMake(120.0, 40.0);
+    }
+    return CGSizeMake(ceil(width), ceil(height));
+}
+
+// Uploads one rendered ImGui frame into the SpringBoard image view.
+static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences) {
+    if (!process || !g_remoteImageView) return NO;
+
+    CGFloat scale = UIScreen.mainScreen.scale;
+    if (scale < 1.0) scale = 2.0;
+    CGSize points = ds_remote_panel_size(preferences);
+
+    NSData *png = DSImGuiPanelRenderPNG((float)points.width, (float)points.height, (float)scale);
+    if (png.length == 0) {
+        NSString *error = DSImGuiLastError();
+        ds_set_error([NSString stringWithFormat:
+            ds_localized(@"ImGui panel render failed: %@"),
+            error.length ? error : @"no pixel data"]);
+        return NO;
+    }
+
+    if (!g_remoteImageBuffer || g_remoteImageBufferSize < (uint64_t)png.length) {
+        if (g_remoteImageBuffer) ds_remote_free(process, g_remoteImageBuffer);
+        g_remoteImageBuffer = ds_remote_malloc(process, (uint64_t)png.length);
+        g_remoteImageBufferSize = g_remoteImageBuffer ? (uint64_t)png.length : 0;
+    }
+    if (!g_remoteImageBuffer) {
+        ds_set_error(ds_localized(@"ImGui panel upload failed: remote allocation"));
+        return NO;
+    }
+    if (![process remote_write:g_remoteImageBuffer from:png.bytes size:(uint64_t)png.length]) {
+        ds_set_error(ds_localized(@"ImGui panel upload failed: remote write"));
+        return NO;
+    }
+
+    uint64_t dataClass = ds_remote_class(process, "NSData");
+    uint64_t alloc = ds_remote_sel(process, "alloc");
+    uint64_t initWithBytes = ds_remote_sel(process, "initWithBytes:length:");
+    if (!dataClass || !alloc || !initWithBytes) return NO;
+
+    uint64_t dataObject = remote_msg(process, dataClass, alloc, 0, 0, 0, 0);
+    if (!dataObject) return NO;
+    uint64_t data = remote_msg(process, dataObject, initWithBytes,
+                               g_remoteImageBuffer, (uint64_t)png.length, 0, 0);
+    if (!data) {
+        uint64_t release = ds_remote_sel(process, "release");
+        if (release) remote_msg(process, dataObject, release, 0, 0, 0, 0);
+        return NO;
+    }
+
+    DSRemoteArgument dataArg = {&data, sizeof(data)};
+    uint64_t image = ds_remote_get_retained_object_on_main(process,
+                                                           ds_remote_class(process, "UIImage"),
+                                                           "imageWithData:",
+                                                           &dataArg, 1);
+    if (!image) {
+        ds_set_error(ds_localized(@"ImGui panel upload failed: UIImage decode"));
+        return NO;
+    }
+
+    ds_perform_on_springboard_main(process, g_remoteImageView,
+                                   ds_remote_sel(process, "setImage:"), image, YES);
+    uint64_t release = ds_remote_sel(process, "release");
+    if (release) remote_msg(process, image, release, 0, 0, 0, 0);
+    return process.trojanMem != 0;
+}
+
+// Panel geometry for the ImGui surface. Kept in one place so the create path
+// and the per-second update path cannot disagree about the window rect.
+static CGRect ds_imgui_panel_frame(NSDictionary *preferences, CGSize *panelSizeOut) {
+    NSNumber *modeValue = preferences[UIInterfaceOrientationIsLandscape(ds_interface_orientation())
+        ? HUDUserDefaultsKeySelectedModeLandscape : HUDUserDefaultsKeySelectedMode];
+    HUDPresetPosition mode = modeValue
+        ? (HUDPresetPosition)modeValue.integerValue : HUDPresetPositionTopCenter;
+
+    CGSize panelSize = ds_remote_panel_size(preferences);
+    CGRect screenBounds;
+    UIEdgeInsets safeInsets;
+    ds_screen_geometry(&screenBounds, &safeInsets);
+
+    CGFloat offsetX = 0.0;
+    CGFloat offsetY = 0.0;
+    if ([preferences[HUDUserDefaultsKeyUsesCustomOffset] boolValue]) {
+        offsetX = -[preferences[HUDUserDefaultsKeyRealCustomOffsetX] doubleValue];
+        offsetY = [preferences[HUDUserDefaultsKeyRealCustomOffsetY] doubleValue];
+    }
+
+    CGFloat x = CGRectGetMidX(screenBounds) - panelSize.width / 2.0;
+    if (mode == HUDPresetPositionTopLeft) {
+        x = CGRectGetMinX(screenBounds) + safeInsets.left + 10.0 + offsetX;
+    } else if (mode == HUDPresetPositionTopRight) {
+        x = CGRectGetMaxX(screenBounds) - safeInsets.right - 10.0 - panelSize.width + offsetX;
+    }
+    CGFloat y;
+    if (mode == HUDPresetPositionTopCenterMost &&
+        UIInterfaceOrientationIsPortrait(ds_interface_orientation())) {
+        y = CGRectGetMinY(screenBounds);
+    } else if (UIInterfaceOrientationIsLandscape(ds_interface_orientation())) {
+        y = CGRectGetMinY(screenBounds) + (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad ? 30.0 : 10.0) + offsetY;
+    } else {
+        CGFloat minimumTop;
+        if (safeInsets.top >= 51.0) minimumTop = -8.0;
+        else if (safeInsets.top > 30.0) minimumTop = -12.0;
+        else minimumTop = UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad ? 30.0 : 20.0;
+        y = CGRectGetMinY(screenBounds) + safeInsets.top + minimumTop + offsetY;
+    }
+
+    if (panelSizeOut) *panelSizeOut = panelSize;
+    return CGRectMake(round(x), round(y), panelSize.width, panelSize.height);
+}
+
+static uint64_t ds_create_springboard_imgui(RemoteCall *process) {
+    NSDictionary *preferences = ds_hud_preferences();
+    CGSize panelSize = CGSizeZero;
+    CGRect windowFrame = ds_imgui_panel_frame(preferences, &panelSize);
+    CGRect panelFrame = CGRectMake(0, 0, panelSize.width, panelSize.height);
+
+    uint64_t alloc = ds_remote_sel(process, "alloc");
+    uint64_t workspaceClass = ds_remote_class(process, "SBMainWorkspace");
+    uint64_t windowClass = ds_remote_class(process, "UIWindow");
+    uint64_t viewClass = ds_remote_class(process, "UIView");
+    uint64_t imageViewClass = ds_remote_class(process, "UIImageView");
+    uint64_t textFieldClass = ds_remote_class(process, "UITextField");
+    uint64_t colorClass = ds_remote_class(process, "UIColor");
+    if (!alloc || !workspaceClass || !windowClass || !viewClass ||
+        !imageViewClass || !textFieldClass || !colorClass) {
+        return 0;
+    }
+
+    uint64_t workspace = ds_remote_get_object_on_main(process, workspaceClass, "sharedInstance");
+    uint64_t scene = workspace ? ds_remote_get_object_on_main(process, workspace, "mainWindowScene") : 0;
+    if (!scene) return 0;
+
+    uint64_t window = remote_msg(process, windowClass, alloc, 0, 0, 0, 0);
+    uint64_t container = remote_msg(process, viewClass, alloc, 0, 0, 0, 0);
+    uint64_t imageView = remote_msg(process, imageViewClass, alloc, 0, 0, 0, 0);
+    uint64_t secureField = remote_msg(process, textFieldClass, alloc, 0, 0, 0, 0);
+    if (!window || !container || !imageView || !secureField) return 0;
+
+    if (!ds_remote_invoke_noarg_on_main(process, window, "init") ||
+        !ds_remote_invoke_noarg_on_main(process, container, "init") ||
+        !ds_remote_invoke_noarg_on_main(process, imageView, "init") ||
+        !ds_remote_invoke_noarg_on_main(process, secureField, "init")) {
+        return 0;
+    }
+
+    ds_remote_set_rect_on_main(process, window, "setFrame:", windowFrame);
+    ds_perform_on_springboard_main(process, window, ds_remote_sel(process, "setWindowScene:"), scene, YES);
+    ds_remote_set_double_on_main(process, window, "setWindowLevel:", kDSHUDWindowLevel);
+    ds_remote_set_u64_on_main(process, window, "setUserInteractionEnabled:", 0);
+    ds_remote_set_u64_on_main(process, window, "setOpaque:", 0);
+
+    ds_remote_set_rect_on_main(process, container, "setFrame:", panelFrame);
+    ds_remote_set_rect_on_main(process, imageView, "setFrame:", panelFrame);
+    ds_remote_set_rect_on_main(process, secureField, "setFrame:", panelFrame);
+
+    uint64_t clear = ds_remote_get_object_on_main(process, colorClass, "clearColor");
+    if (!clear) return 0;
+    ds_perform_on_springboard_main(process, window, ds_remote_sel(process, "setBackgroundColor:"), clear, YES);
+    ds_perform_on_springboard_main(process, container, ds_remote_sel(process, "setBackgroundColor:"), clear, YES);
+    ds_perform_on_springboard_main(process, imageView, ds_remote_sel(process, "setBackgroundColor:"), clear, YES);
+    ds_perform_on_springboard_main(process, secureField, ds_remote_sel(process, "setBackgroundColor:"), clear, YES);
+
+    ds_remote_set_u64_on_main(process, container, "setTag:", (uint64_t)kDSSpringBoardHUDTag);
+    ds_remote_set_u64_on_main(process, container, "setHidden:", 0);
+    ds_remote_set_u64_on_main(process, container, "setUserInteractionEnabled:", 0);
+    ds_remote_set_u64_on_main(process, container, "setAutoresizingMask:",
+                              UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
+    ds_remote_set_u64_on_main(process, imageView, "setUserInteractionEnabled:", 0);
+    ds_remote_set_u64_on_main(process, imageView, "setOpaque:", 0);
+    ds_remote_set_u64_on_main(process, imageView, "setContentMode:", (uint64_t)1);
+    ds_remote_set_u64_on_main(process, secureField, "setUserInteractionEnabled:", 0);
+    ds_remote_set_u64_on_main(process, secureField, "setOpaque:", 0);
+    ds_remote_set_double_on_main(process, container, "setAlpha:", 1.0);
+
+    ds_perform_on_springboard_main(process, container, ds_remote_sel(process, "addSubview:"), imageView, YES);
+    ds_perform_on_springboard_main(process, window, ds_remote_sel(process, "addSubview:"), secureField, YES);
+
+    g_remoteWindow = window;
+    g_remoteContainer = container;
+    g_remoteImageView = imageView;
+    g_remoteSecureField = secureField;
+    g_remoteSecureCanvas = ds_remote_secure_canvas(process, secureField);
+    ds_apply_snapshot_container(process, [preferences[HUDUserDefaultsKeyHideAtSnapshot] boolValue]);
+    ds_remote_set_u64_on_main(process, window, "setHidden:", 0);
+
+    g_remoteWindowScene = scene;
+    g_remoteWindowPid = process.pid;
+    g_remoteBlurView = 0;
+    g_remoteBlurEffect = 0;
+    g_remoteLabel = 0;
+    g_imguiPathActive = YES;
+    g_lastWindowFrame = windowFrame;
+    g_lastLabelFrame = panelFrame;
+    g_lastWindowHidden = NO;
+    g_lastContainerAlpha = 1.0;
+    g_lastFontSize = 0;
+    g_lastInverted = [preferences[HUDUserDefaultsKeyUsesInvertedColor] boolValue];
+    g_focusUntil = CFAbsoluteTimeGetCurrent() + kDSHUDFocusDuration;
+
+    if (!ds_update_imgui_panel(process, preferences)) {
+        ds_append_checkpoint(ds_localized(@"ImGui panel upload failed; keeping the empty panel"));
+    }
+    return imageView;
+}
+
 // The HUD lives in its own UIWindow anchored to SBMainWorkspace.mainWindowScene
 // Adding to whatever keyWindow we can find is
 // unreliable — that window may be hidden, tiny, or off-screen.
@@ -1316,7 +1582,8 @@ static BOOL ds_apply_remote_presentation(RemoteCall *process,
 }
 
 static void ds_update_rate(void) {
-    if (!g_hudRequested.load() || !g_hudActive.load() || !g_springBoard || !g_remoteLabel) return;
+    if (!g_hudRequested.load() || !g_hudActive.load() || !g_springBoard) return;
+    if (!g_remoteLabel && !g_remoteImageView) return;
 
     uint64_t input = 0;
     uint64_t output = 0;
@@ -1348,6 +1615,50 @@ static void ds_update_rate(void) {
     NSUInteger presentationSignature = preferences.description.hash ^
                                        (NSUInteger)ds_interface_orientation();
     BOOL applyStyle = presentationSignature != g_lastPresentationSignature;
+
+    if (g_imguiPathActive) {
+        @try {
+            if (!ds_update_imgui_panel(g_springBoard, preferences)) {
+                @throw [NSException exceptionWithName:@"DSRemoteHUDUpdate"
+                                               reason:@"imgui panel update failed"
+                                             userInfo:nil];
+            }
+            CGSize panelSize = CGSizeZero;
+            CGRect windowFrame = ds_imgui_panel_frame(preferences, &panelSize);
+            CGRect panelFrame = CGRectMake(0, 0, panelSize.width, panelSize.height);
+            if (!CGRectEqualToRect(g_lastWindowFrame, windowFrame)) {
+                ds_remote_set_rect_on_main(g_springBoard, g_remoteWindow, "setFrame:", windowFrame);
+                if (g_remoteContainer) {
+                    ds_remote_set_rect_on_main(g_springBoard, g_remoteContainer, "setFrame:", panelFrame);
+                }
+                if (g_remoteImageView) {
+                    ds_remote_set_rect_on_main(g_springBoard, g_remoteImageView, "setFrame:", panelFrame);
+                }
+                if (g_remoteSecureField) {
+                    ds_remote_set_rect_on_main(g_springBoard, g_remoteSecureField, "setFrame:", panelFrame);
+                }
+                g_lastWindowFrame = windowFrame;
+                g_lastLabelFrame = panelFrame;
+            }
+            BOOL hideForLandscape = presentation.landscape && !presentation.followsRotation;
+            if (hideForLandscape != g_lastWindowHidden) {
+                ds_remote_set_u64_on_main(g_springBoard, g_remoteWindow, "setHidden:",
+                                          hideForLandscape ? 1 : 0);
+                g_lastWindowHidden = hideForLandscape;
+            }
+            if (applyStyle &&
+                g_lastHideAtSnapshot != [preferences[HUDUserDefaultsKeyHideAtSnapshot] boolValue]) {
+                ds_apply_snapshot_container(g_springBoard,
+                                            [preferences[HUDUserDefaultsKeyHideAtSnapshot] boolValue]);
+            }
+            g_lastPresentationSignature = presentationSignature;
+        } @catch (NSException *exception) {
+            ds_set_error([NSString stringWithFormat:@"SpringBoard HUD update failed: %@", exception.reason]);
+            g_hudActive.store(false);
+        }
+        g_imguiFrameCount++;
+        return;
+    }
 
     @try {
         if (!ds_apply_remote_presentation(
@@ -1536,6 +1847,11 @@ static void ds_finish_disable(void) {
         } @catch (NSException *exception) {
             os_log_error(OS_LOG_DEFAULT, "[DSBridge] HUD remove exception: %{public}@", exception.reason);
         }
+        if (g_remoteImageBuffer) {
+            // Release the SpringBoard-side PNG scratch page while RemoteCall is
+            // still alive; after destroyRemoteCall the pointer is meaningless.
+            ds_remote_free(process, g_remoteImageBuffer);
+        }
         @try {
             [process destroyRemoteCall];
         } @catch (NSException *exception) {
@@ -1546,6 +1862,12 @@ static void ds_finish_disable(void) {
     g_remoteBlurView = 0;
     g_remoteBlurEffect = 0;
     g_remoteLabel = 0;
+    g_imguiPathActive = NO;
+    g_imguiFrameCount = 0;
+    g_remoteImageView = 0;
+    g_remoteImageBuffer = 0;
+    g_remoteImageBufferSize = 0;
+    g_remoteImage = 0;
     g_remoteSecureField = 0;
     g_remoteSecureCanvas = 0;
     g_remoteWindow = 0;
@@ -1626,7 +1948,21 @@ static void ds_finish_enable(void) {
 
         g_dsProgress.store(0.99);
         ds_set_stage(ds_localized(@"Creating SpringBoard HUD"));
-        g_remoteLabel = ds_create_springboard_hud(g_springBoard);
+        if (ds_imgui_panel_enabled(ds_hud_preferences())) {
+            g_imguiPathActive = YES;
+            uint64_t imageView = ds_create_springboard_imgui(g_springBoard);
+            if (!imageView) {
+                g_imguiPathActive = NO;
+                ds_append_checkpoint(ds_localized(@"ImGui panel unavailable; falling back to the label HUD"));
+                ds_set_stage(ds_localized(@"Falling back to the label HUD"));
+            } else {
+                g_remoteLabel = imageView;
+            }
+        }
+        if (!g_remoteLabel) {
+            g_imguiPathActive = NO;
+            g_remoteLabel = ds_create_springboard_hud(g_springBoard);
+        }
         if (!g_remoteLabel) {
             [g_springBoard destroyRemoteCall];
             g_springBoard = nil;

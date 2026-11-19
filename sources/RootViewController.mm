@@ -15,6 +15,7 @@
 #import "RootViewController.h"
 #import "UIApplication+Private.h"
 #import "HUDRootViewController.h"
+#import "DSImGuiOverlay.h"
 
 #define HUD_TRANSITION_DURATION 0.25
 
@@ -325,6 +326,9 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
     if (motion == UIEventSubtypeMotionShake) {
         UIAlertController *alertController = [UIAlertController alertControllerWithTitle:NSLocalizedString(@"Developer Area", nil) message:NSLocalizedString(@"Choose an action below.", nil) preferredStyle:UIAlertControllerStyleAlert];
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Dismiss", nil) style:UIAlertActionStyleCancel handler:nil]];
+        [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"ImGui Console", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+            DSImGuiOverlaySetVisible(!DSImGuiOverlayIsVisible());
+        }]];
         [alertController addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"Reset Settings", nil) style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
             [self resetUserDefaults];
         }]];

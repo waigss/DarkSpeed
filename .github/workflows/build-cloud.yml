@@ -1,0 +1,83 @@
+name: Cloud Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cloud-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Toolchain report
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          echo "--- schemes ---"
+          xcodebuild -list -project DarkSpeed.xcodeproj
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION="$(./get-version.sh)"
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "DarkSpeed version: $VERSION"
+
+      - name: Build signed-free IPA
+        run: |
+          set -o pipefail
+          chmod +x ./build-darkspeed.sh ./get-version.sh
+          DARKSPEED_UNSIGNED=1 ./build-darkspeed.sh 2>&1 | tee build.log
+
+      - name: Verify archive layout
+        if: always()
+        run: |
+          echo "--- packages ---"
+          ls -la packages || true
+          echo "--- app bundle ---"
+          find DarkSpeed.xcarchive/Products/Applications -maxdepth 3 | head -80 || true
+          echo "--- embedded dylibs ---"
+          ls -la DarkSpeed.xcarchive/Products/Applications/DarkSpeed.app/Frameworks || true
+
+      - name: Collect build log
+        if: always()
+        run: |
+          mkdir -p packages
+          cp build.log "packages/DarkSpeed_${{ steps.version.outputs.value }}_build.log" || true
+
+      - name: Upload IPA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSpeed_${{ steps.version.outputs.value }}
+          if-no-files-found: warn
+          path: |
+            packages/DarkSpeed_*.ipa
+            packages/DarkSpeed_*.ipa.sha256
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkSpeed_${{ steps.version.outputs.value }}_log
+          if-no-files-found: warn
+          path: |
+            packages/DarkSpeed_*_build.log

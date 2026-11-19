@@ -11,6 +11,7 @@
 
 #import "HUDHelper.h"
 #import "DSBridge.h"
+#import "DSImGuiOverlay.h"
 
 @implementation MainApplicationDelegate {
     RootViewController *_rootViewController;
@@ -34,6 +35,9 @@
             return YES;
         } else if ([url.host isEqualToString:@"off"]) {
             [self setupAndNotifyToggleHUDAfterLaunchWithAction:kToggleHUDAfterLaunchNotificationActionToggleOff];
+            return YES;
+        } else if ([url.host isEqualToString:@"imgui"]) {
+            DSImGuiOverlaySetVisible(!DSImGuiOverlayIsVisible());
             return YES;
         }
     }

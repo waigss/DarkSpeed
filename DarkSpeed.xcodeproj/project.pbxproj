@@ -130,6 +130,24 @@
 		CC91309E2B616541006E3280 /* HUDBackdropLabel.mm in Sources */ = {isa = PBXBuildFile; fileRef = CC91309D2B616541006E3280 /* HUDBackdropLabel.mm */; };
 		CC9130A32B616C18006E3280 /* HUDBackdropView.mm in Sources */ = {isa = PBXBuildFile; fileRef = CC9130A22B616C18006E3280 /* HUDBackdropView.mm */; };
 		CC9130A72B62A33A006E3280 /* TSSettingsIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9130A62B62A33A006E3280 /* TSSettingsIndex.swift */; };
+		DA0000000000000000000001 /* DSImGuiHUDCore.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000001 /* DSImGuiHUDCore.mm */; };
+		DB0000000000000000000001 /* DSImGuiHUDCore.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000001 /* DSImGuiHUDCore.mm */; };
+		DA0000000000000000000002 /* DSImGuiOverlay.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000002 /* DSImGuiOverlay.mm */; };
+		DB0000000000000000000002 /* DSImGuiOverlay.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000002 /* DSImGuiOverlay.mm */; };
+		DA0000000000000000000003 /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000003 /* imgui.cpp */; };
+		DB0000000000000000000003 /* imgui.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000003 /* imgui.cpp */; };
+		DA0000000000000000000004 /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000004 /* imgui_draw.cpp */; };
+		DB0000000000000000000004 /* imgui_draw.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000004 /* imgui_draw.cpp */; };
+		DA0000000000000000000005 /* imgui_tables.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000005 /* imgui_tables.cpp */; };
+		DB0000000000000000000005 /* imgui_tables.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000005 /* imgui_tables.cpp */; };
+		DA0000000000000000000006 /* imgui_widgets.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000006 /* imgui_widgets.cpp */; };
+		DB0000000000000000000006 /* imgui_widgets.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000006 /* imgui_widgets.cpp */; };
+		DA0000000000000000000007 /* imgui_demo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000007 /* imgui_demo.cpp */; };
+		DB0000000000000000000007 /* imgui_demo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000007 /* imgui_demo.cpp */; };
+		DA0000000000000000000008 /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000008 /* imgui_impl_metal.mm */; };
+		DB0000000000000000000008 /* imgui_impl_metal.mm in Sources */ = {isa = PBXBuildFile; fileRef = DC0000000000000000000008 /* imgui_impl_metal.mm */; };
+		DE0000000000000000000002 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE0000000000000000000001 /* Metal.framework */; };
+		DE0000000000000000000003 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DE0000000000000000000001 /* Metal.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -254,6 +272,21 @@
 		CC9130A52B62A262006E3280 /* hudapp-bridging-header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "hudapp-bridging-header.h"; sourceTree = "<group>"; };
 		CC9130A62B62A33A006E3280 /* TSSettingsIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TSSettingsIndex.swift; sourceTree = "<group>"; };
 		CCB6B6FA2B5C06DD00AD2A89 /* NSUserDefaults+Private.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "NSUserDefaults+Private.h"; sourceTree = "<group>"; };
+		DC0000000000000000000001 /* DSImGuiHUDCore.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = DSImGuiHUDCore.mm; path = darksword/imguihud/DSImGuiHUDCore.mm; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000002 /* DSImGuiOverlay.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = DSImGuiOverlay.mm; path = darksword/imguihud/DSImGuiOverlay.mm; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000003 /* imgui.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui.cpp; path = Vendor/imgui/imgui.cpp; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000004 /* imgui_draw.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_draw.cpp; path = Vendor/imgui/imgui_draw.cpp; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000005 /* imgui_tables.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_tables.cpp; path = Vendor/imgui/imgui_tables.cpp; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000006 /* imgui_widgets.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_widgets.cpp; path = Vendor/imgui/imgui_widgets.cpp; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000007 /* imgui_demo.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = imgui_demo.cpp; path = Vendor/imgui/imgui_demo.cpp; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000008 /* imgui_impl_metal.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = imgui_impl_metal.mm; path = Vendor/imgui/backends/imgui_impl_metal.mm; sourceTree = SOURCE_ROOT; };
+		DC0000000000000000000009 /* DSImGuiHUDCore.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DSImGuiHUDCore.hpp; path = darksword/imguihud/DSImGuiHUDCore.hpp; sourceTree = SOURCE_ROOT; };
+		DC000000000000000000000A /* DSImGuiOverlay.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = DSImGuiOverlay.h; path = darksword/imguihud/DSImGuiOverlay.h; sourceTree = SOURCE_ROOT; };
+		DC000000000000000000000B /* imgui.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = imgui.h; path = Vendor/imgui/imgui.h; sourceTree = SOURCE_ROOT; };
+		DC000000000000000000000C /* imgui_internal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = imgui_internal.h; path = Vendor/imgui/imgui_internal.h; sourceTree = SOURCE_ROOT; };
+		DC000000000000000000000D /* imgui_impl_metal.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = imgui_impl_metal.h; path = Vendor/imgui/backends/imgui_impl_metal.h; sourceTree = SOURCE_ROOT; };
+		DC000000000000000000000E /* imconfig.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = imconfig.h; path = Vendor/imgui/imconfig.h; sourceTree = SOURCE_ROOT; };
+		DE0000000000000000000001 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -267,6 +300,7 @@
 				CC654E392DABD9C200D54F83 /* AssertionServices.Sim.tbd in Frameworks */,
 				CC654E3A2DABD9C200D54F83 /* GraphicsServices.Sim.tbd in Frameworks */,
 				CC654E3B2DABD9C200D54F83 /* SpringBoardServices.Sim.tbd in Frameworks */,
+				DE0000000000000000000003 /* Metal.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,6 +317,7 @@
 				CC711D9C2B5C0032007235A6 /* IOKit.tbd in Frameworks */,
 				CC711D9A2B5BFF2F007235A6 /* BackBoardServices.tbd in Frameworks */,
 				CC711D982B5BFF2F007235A6 /* GraphicsServices.tbd in Frameworks */,
+				DE0000000000000000000002 /* Metal.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -321,6 +356,8 @@
 				CC711D942B5BFE9F007235A6 /* libraries */,
 				CC711D032B5BF550007235A6 /* supports */,
 				DSB100052B5BF5C6007235A6 /* darksword */,
+				DD0000000000000000000002 /* imguihud */,
+				DD0000000000000000000001 /* imgui */,
 				CC711D1D2B5BF5C6007235A6 /* sources */,
 				CC8DDA972B66318E001C7C9E /* Frameworks */,
 			);
@@ -497,6 +534,34 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		DD0000000000000000000001 /* imgui */ = {
+			isa = PBXGroup;
+			children = (
+				DC000000000000000000000B /* imgui.h */,
+				DC000000000000000000000C /* imgui_internal.h */,
+				DC000000000000000000000E /* imconfig.h */,
+				DC0000000000000000000003 /* imgui.cpp */,
+				DC0000000000000000000004 /* imgui_draw.cpp */,
+				DC0000000000000000000005 /* imgui_tables.cpp */,
+				DC0000000000000000000006 /* imgui_widgets.cpp */,
+				DC0000000000000000000007 /* imgui_demo.cpp */,
+				DC000000000000000000000D /* imgui_impl_metal.h */,
+				DC0000000000000000000008 /* imgui_impl_metal.mm */,
+			);
+			path = Vendor/imgui;
+			sourceTree = "<group>";
+		};
+		DD0000000000000000000002 /* imguihud */ = {
+			isa = PBXGroup;
+			children = (
+				DC0000000000000000000009 /* DSImGuiHUDCore.hpp */,
+				DC0000000000000000000001 /* DSImGuiHUDCore.mm */,
+				DC000000000000000000000A /* DSImGuiOverlay.h */,
+				DC0000000000000000000002 /* DSImGuiOverlay.mm */,
+			);
+			path = darksword/imguihud;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -657,6 +722,14 @@
 				CC654E2D2DABD9C200D54F83 /* SPLarkTransitioningDelegate.swift in Sources */,
 				CC654E2E2DABD9C200D54F83 /* SPLarkSettingsCollectionViewCell.swift in Sources */,
 				CC654E2F2DABD9C200D54F83 /* HUDMainWindow.mm in Sources */,
+				DB0000000000000000000001 /* DSImGuiHUDCore.mm in Sources */,
+				DB0000000000000000000002 /* DSImGuiOverlay.mm in Sources */,
+				DB0000000000000000000003 /* imgui.cpp in Sources */,
+				DB0000000000000000000004 /* imgui_draw.cpp in Sources */,
+				DB0000000000000000000005 /* imgui_tables.cpp in Sources */,
+				DB0000000000000000000006 /* imgui_widgets.cpp in Sources */,
+				DB0000000000000000000007 /* imgui_demo.cpp in Sources */,
+				DB0000000000000000000008 /* imgui_impl_metal.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -712,6 +785,14 @@
 				CC711D5A2B5BF5C6007235A6 /* SPLarkTransitioningDelegate.swift in Sources */,
 				CC711D542B5BF5C6007235A6 /* SPLarkSettingsCollectionViewCell.swift in Sources */,
 				CC711D4C2B5BF5C6007235A6 /* HUDMainWindow.mm in Sources */,
+				DA0000000000000000000001 /* DSImGuiHUDCore.mm in Sources */,
+				DA0000000000000000000002 /* DSImGuiOverlay.mm in Sources */,
+				DA0000000000000000000003 /* imgui.cpp in Sources */,
+				DA0000000000000000000004 /* imgui_draw.cpp in Sources */,
+				DA0000000000000000000005 /* imgui_tables.cpp in Sources */,
+				DA0000000000000000000006 /* imgui_widgets.cpp in Sources */,
+				DA0000000000000000000007 /* imgui_demo.cpp in Sources */,
+				DA0000000000000000000008 /* imgui_impl_metal.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -782,6 +863,16 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "supports/hudapp-bridging-header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/imgui",
+					"$(SRCROOT)/Vendor/imgui/backends",
+					"$(SRCROOT)/darksword/imguihud",
+					"$(SRCROOT)/darksword",
+					"$(SRCROOT)/headers",
+				);
 			};
 			name = Debug;
 		};
@@ -891,6 +982,9 @@
 					"$(SRCROOT)/Vendor/darksword-kexploit",
 					"$(SRCROOT)/Vendor/darksword-kexploit/pe",
 					"$(SRCROOT)/Vendor/darksword-kexploit/TaskRop",
+					"$(SRCROOT)/Vendor/imgui",
+					"$(SRCROOT)/Vendor/imgui/backends",
+					"$(SRCROOT)/darksword/imguihud",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
@@ -960,6 +1054,9 @@
 					"$(SRCROOT)/Vendor/darksword-kexploit",
 					"$(SRCROOT)/Vendor/darksword-kexploit/pe",
 					"$(SRCROOT)/Vendor/darksword-kexploit/TaskRop",
+					"$(SRCROOT)/Vendor/imgui",
+					"$(SRCROOT)/Vendor/imgui/backends",
+					"$(SRCROOT)/darksword/imguihud",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = 14.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
@@ -1085,6 +1182,16 @@
 				SWIFT_OBJC_BRIDGING_HEADER = "supports/hudapp-bridging-header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/imgui",
+					"$(SRCROOT)/Vendor/imgui/backends",
+					"$(SRCROOT)/darksword/imguihud",
+					"$(SRCROOT)/darksword",
+					"$(SRCROOT)/headers",
+				);
 			};
 			name = Release;
 		};
