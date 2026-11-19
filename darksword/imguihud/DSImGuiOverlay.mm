@@ -709,19 +709,67 @@ static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
         // itself is assembled below without them and renders once warm-up
         // completes. The app UI is therefore never blocked or killed by this.
         state.wantsVisible = YES;
+        CGFloat screenScale = UIScreen.mainScreen.scale;
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            // Serialise against the panel renderer and the frame tick: they
+            // mutate the process-global GImGui and the shared glyph ranges.
+            std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
             @try {
                 DSImGuiBreadcrumb("warmup-begin");
+
                 DSImGuiCtx warm;
-                if (!DSImGuiEnsureContextOverlay(warm, 15.0f,
-                                                 (float)UIScreen.mainScreen.scale)) {
-                    DSImGuiBreadcrumb("warmup-failed");
+                warm.ctx = ImGui::CreateContext();
+                if (!warm.ctx) {
+                    DSImGuiBreadcrumb("step-ctx-failed");
                     dispatch_async(dispatch_get_main_queue(), ^{
                         OverlayState().warmupFailed = YES;
-                        DSImGuiSetError(DSImGuiLastError());
+                        DSImGuiSetError(@"ImGui context creation failed");
                     });
                     return;
                 }
+                DSImGuiBreadcrumb("step-ctx-created");
+
+                ImGui::SetCurrentContext(warm.ctx);
+                DSImGuiHUDUi::ApplyDarkTheme();
+                DSImGuiBreadcrumb("step-theme");
+
+                DSImGuiHUDUi::SetupFontAtlas(15.0f * MAX(1.0f, (float)screenScale));
+                DSImGuiBreadcrumb("step-atlas");
+
+                ImGuiIO &warmIO = ImGui::GetIO();
+                warmIO.FontGlobalScale = 1.0f;
+
+                warm.device = MTLCreateSystemDefaultDevice();
+                DSImGuiBreadcrumb("step-device");
+                if (!warm.device) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        OverlayState().warmupFailed = YES;
+                        DSImGuiSetError(@"This device exposes no Metal device");
+                    });
+                    return;
+                }
+
+                warm.queue = [warm.device newCommandQueue];
+                DSImGuiBreadcrumb("step-queue");
+                if (!warm.queue) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        OverlayState().warmupFailed = YES;
+                        DSImGuiSetError(@"Metal command queue creation failed");
+                    });
+                    return;
+                }
+
+                if (!ImGui_ImplMetal_Init(warm.device)) {
+                    DSImGuiBreadcrumb("step-backend-failed");
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        OverlayState().warmupFailed = YES;
+                        DSImGuiSetError(@"ImGui Metal backend init failed");
+                    });
+                    return;
+                }
+                warm.metalReady = true;
+                DSImGuiBreadcrumb("step-backend-done");
+
                 dispatch_async(dispatch_get_main_queue(), ^{
                     OverlayState().ctx = warm;
                     OverlayState().warmedUp = YES;

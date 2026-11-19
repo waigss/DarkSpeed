@@ -311,28 +311,16 @@ void DSImGuiHUDUi::SetupFontAtlas(float pixelSize) {
                     "\xC2\xB7\xE2\x80\x94\xE2\x80\xA6");
     builder.BuildRanges(&ranges);
 
-    ImFontConfig scaled = base;
-    scaled.SizePixels = pixelSize;
-    const ImWchar *glyphRanges = ranges.Data ? ranges.Data : io.Fonts->GetGlyphRangesDefault();
-
     io.Fonts->Clear();
     io.Fonts->TexDesiredWidth = 1024;
 
-    // Prefer a light system font; the embedded default keeps the atlas working
-    // even if none of these exist on a given iOS build.
-    ImFont *font = io.Fonts->AddFontFromFileTTF(
-        "/System/Library/Fonts/CoreUI/SFUI.ttf", pixelSize, &scaled, glyphRanges);
-    if (!font) {
-        font = io.Fonts->AddFontFromFileTTF(
-            "/System/Library/Fonts/Core/SFUI.ttf", pixelSize, &scaled, glyphRanges);
-    }
-    if (!font) {
-        font = io.Fonts->AddFontDefault(&base);
-    }
+    // Embedded font only. Loading system TTFs by path from the app sandbox was
+    // the prime suspect for a hard crash inside stb_truetype; ProggyClean is
+    // compiled in, needs no file access, and covers the HUD's Latin strings.
+    ImFont *font = io.Fonts->AddFontDefault(&base);
+    (void)font;
 
     if (!io.Fonts->Build()) {
-        // A partially built atlas would make every glyph lookup fail at draw
-        // time; fall back to the embedded font with a minimal atlas instead.
         io.Fonts->Clear();
         io.Fonts->AddFontDefault(&base);
         io.Fonts->Build();
