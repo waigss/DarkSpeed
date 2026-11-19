@@ -589,8 +589,8 @@ void DSImGuiSetLaunching(BOOL launching) {
 }
 
 static void DSImGuiBreadcrumb(const char *stage) {
-    // Appended before each risky step so a hard crash still leaves the last
-    // reached stage on disk for the next launch to report.
+    // Append-only: a hard crash leaves the FULL sequence on disk, not just the
+    // last line. Trimmed on read if it ever grows absurdly large.
     static NSString *path = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -601,8 +601,21 @@ static void DSImGuiBreadcrumb(const char *stage) {
         }
     });
     if (!path) return;
-    NSString *line = [NSString stringWithFormat:@"%s\n", stage ? stage : "?"];
-    [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSString *existing = [NSString stringWithContentsOfFile:path
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:nil] ?: @"";
+    // Keep roughly the last 100 entries.
+    NSArray *lines = [existing componentsSeparatedByString:@"\n"];
+    if (lines.count > 100) {
+        existing = [[lines subarrayWithIndex:NSMakeRange(lines.count - 100, 100)]
+            componentsJoinedByString:@"\n"];
+    }
+    NSString *line = [NSString stringWithFormat:@"%@ %s\n",
+                      [NSDate date], stage ? stage : "?"];
+    NSMutableString *next = [existing mutableCopy];
+    if (next.length && ![next hasSuffix:@"\n"]) [next appendString:@"\n"];
+    [next appendString:line];
+    [next writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 static void DSImGuiOverlayTick(CADisplayLink *link) {

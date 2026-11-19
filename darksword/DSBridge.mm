@@ -1146,6 +1146,28 @@ static BOOL ds_apply_snapshot_container(RemoteCall *process, BOOL hideAtSnapshot
 // therefore never runs ImGui, and the remote side keeps the same UIWindow /
 // snapshot-hiding containers as the label path.
 
+// Appends to the same DSImGui.stage trace the overlay writes, so the whole
+// RemoteCall panel flow is visible in one file after a hard crash.
+static void ds_imgui_stage(NSString *stage) {
+    NSString *library = NSSearchPathForDirectoriesInDomains(
+        NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    if (!library.length) return;
+    NSString *path = [library stringByAppendingPathComponent:@"DSImGui.stage"];
+    NSString *existing = [NSString stringWithContentsOfFile:path
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:nil] ?: @"";
+    NSArray *lines = [existing componentsSeparatedByString:@"\n"];
+    if (lines.count > 100) {
+        existing = [[lines subarrayWithIndex:NSMakeRange(lines.count - 100, 100)]
+            componentsJoinedByString:@"\n"];
+    }
+    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], stage];
+    NSMutableString *next = [existing mutableCopy];
+    if (next.length && ![next hasSuffix:@"\n"]) [next appendString:@"\n"];
+    [next appendString:line];
+    [next writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
 // Remote malloc/free reached through remote_dlsym: the address is resolved in
 // SpringBoard, so the trampoline branches to something valid there. RemoteCall
 // only strips PAC bits from the pointer it receives and never rebases it.
@@ -1228,19 +1250,24 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
 
     // The panel buffer needs its own allocation: RemoteCall's scratch page is
     // already carved into argument/return/text slots and is only 16 KB.
+    ds_imgui_stage(@"panel-alloc-begin");
     if (!g_remoteImageBuffer || g_remoteImageBufferSize < (uint64_t)png.length) {
         if (g_remoteImageBuffer) ds_remote_free(process, g_remoteImageBuffer);
         g_remoteImageBuffer = ds_remote_malloc(process, (uint64_t)png.length);
         g_remoteImageBufferSize = g_remoteImageBuffer ? (uint64_t)png.length : 0;
     }
+    ds_imgui_stage(g_remoteImageBuffer ? @"panel-alloc-ok" : @"panel-alloc-fail");
     if (!g_remoteImageBuffer) {
         ds_set_error(ds_localized(@"ImGui panel upload failed: remote allocation"));
         return NO;
     }
+    ds_imgui_stage(@"panel-write-begin");
     if (![process remote_write:g_remoteImageBuffer from:png.bytes size:(uint64_t)png.length]) {
+        ds_imgui_stage(@"panel-write-fail");
         ds_set_error(ds_localized(@"ImGui panel upload failed: remote write"));
         return NO;
     }
+    ds_imgui_stage(@"panel-write-ok");
 
     uint64_t alloc = ds_remote_sel(process, "alloc");
     uint64_t release = ds_remote_sel(process, "release");
@@ -1260,9 +1287,11 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
     // exactly what took SpringBoard down.
     uint64_t data = remote_msg(process, dataClass, alloc, 0, 0, 0, 0);
     if (!data) return NO;
+    ds_imgui_stage(@"panel-nsdata-begin");
     // initWithBytes:length: copies, so the reusable remote buffer is untouched.
     data = remote_msg(process, data, initWithBytes,
                       g_remoteImageBuffer, (uint64_t)png.length, 0, 0);
+    ds_imgui_stage(data ? @"panel-nsdata-ok" : @"panel-nsdata-fail");
     if (!data) {
         ds_set_error(ds_localized(@"ImGui panel upload failed: NSData"));
         return NO;
@@ -1273,12 +1302,16 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
         remote_msg(process, data, release, 0, 0, 0, 0);
         return NO;
     }
+    ds_imgui_stage(@"panel-image-begin");
     image = remote_msg(process, image, initWithData, data, 0, 0, 0);
+    ds_imgui_stage(image ? @"panel-image-ok" : @"panel-image-fail");
 
     BOOL decoded = image != 0 && process.trojanMem != 0;
     if (decoded) {
+        ds_imgui_stage(@"panel-setimage-begin");
         ds_perform_on_springboard_main(process, g_remoteImageView,
                                        ds_remote_sel(process, "setImage:"), image, YES);
+        ds_imgui_stage(@"panel-setimage-done");
     } else {
         ds_set_error(ds_localized(@"ImGui panel upload failed: PNG decode"));
     }
@@ -1338,6 +1371,7 @@ static CGRect ds_imgui_panel_frame(NSDictionary *preferences, CGSize *panelSizeO
 }
 
 static uint64_t ds_create_springboard_imgui(RemoteCall *process) {
+    ds_imgui_stage(@"panel-create-begin");
     NSDictionary *preferences = ds_hud_preferences();
     CGSize panelSize = CGSizeZero;
     CGRect windowFrame = ds_imgui_panel_frame(preferences, &panelSize);
@@ -2025,6 +2059,7 @@ static void ds_finish_enable(void) {
     }
 
     g_dsProgress.store(0.96);
+    ds_imgui_stage(@"enable-locate-sb");
     ds_set_stage(ds_localized(@"Locating SpringBoard"));
     ds_post_progress();
     uint64_t sbProc = proc_find_by_name("SpringBoard");
@@ -2037,6 +2072,7 @@ static void ds_finish_enable(void) {
         os_log(OS_LOG_DEFAULT, "[DSBridge] SpringBoard proc=0x%llx self=0x%llx — starting RemoteCall",
                (unsigned long long)sbProc, (unsigned long long)ds_get_our_proc());
         g_dsProgress.store(0.98);
+        ds_imgui_stage(@"enable-remotecall");
         ds_set_stage(ds_localized(@"Connecting to SpringBoard"));
         ds_reset_remote_symbol_cache();
         g_springBoard = [[RemoteCall alloc] initWithProcess:@"SpringBoard" useMigFilterBypass:NO];
