@@ -23,7 +23,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
 
       - name: Toolchain report
@@ -31,31 +30,29 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
-          echo "--- schemes ---"
-          xcodebuild -list -project DarkSpeed.xcodeproj
 
       - name: Resolve version
         id: version
         run: |
+          chmod +x ./get-version.sh ./build-darkspeed.sh
           VERSION="$(./get-version.sh)"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
           echo "DarkSpeed version: $VERSION"
 
-      - name: Build signed-free IPA
+      - name: Build unsigned IPA
         run: |
           set -o pipefail
-          chmod +x ./build-darkspeed.sh ./get-version.sh
           DARKSPEED_UNSIGNED=1 ./build-darkspeed.sh 2>&1 | tee build.log
 
-      - name: Verify archive layout
+      - name: Report archive layout
         if: always()
         run: |
           echo "--- packages ---"
           ls -la packages || true
           echo "--- app bundle ---"
-          find DarkSpeed.xcarchive/Products/Applications -maxdepth 3 | head -80 || true
+          find DarkSpeed.xcarchive/Products/Applications -maxdepth 3 2>/dev/null | head -80 || true
           echo "--- embedded dylibs ---"
-          ls -la DarkSpeed.xcarchive/Products/Applications/DarkSpeed.app/Frameworks || true
+          ls -la DarkSpeed.xcarchive/Products/Applications/DarkSpeed.app/Frameworks 2>/dev/null || true
 
       - name: Collect build log
         if: always()
@@ -64,7 +61,6 @@ jobs:
           cp build.log "packages/DarkSpeed_${{ steps.version.outputs.value }}_build.log" || true
 
       - name: Upload IPA
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: DarkSpeed_${{ steps.version.outputs.value }}
