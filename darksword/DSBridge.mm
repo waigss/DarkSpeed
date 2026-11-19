@@ -291,16 +291,7 @@ static void ds_start_kernel_prefetch(BOOL retryFailed) {
             ds_set_error(@"");
             ds_set_stage(ds_localized(@"Kernelcache cached"));
         } else {
-            const char *detail = dlkcache_last_error();
-            NSString *reason = (detail && detail[0])
-                ? [NSString stringWithUTF8String:detail] : @"";
-            os_log_error(OS_LOG_DEFAULT, "[DSBridge] kernelcache prefetch failed: %{public}@", reason);
-            // Keep the detail where the controller can show it: without this the
-            // UI only had a generic "network may still be pending" hint.
-            if (reason.length > 0) {
-                ds_set_error([NSString stringWithFormat:
-                    ds_localized(@"System data unavailable: %@"), reason]);
-            }
+            os_log_error(OS_LOG_DEFAULT, "[DSBridge] kernelcache prefetch failed");
             if (g_networkWarmupState.load() == 1) {
                 ds_set_stage(ds_localized(@"Requesting network access"));
             } else {
@@ -1114,101 +1105,9 @@ static BOOL ds_apply_snapshot_container(RemoteCall *process, BOOL hideAtSnapshot
 // therefore never runs ImGui, and the remote side keeps the same UIWindow /
 // snapshot-hiding containers as the label path.
 
-// Marks the ImGui path as "armed" before the remote views are built and only
-// clears it once the HUD is live. A leftover marker at startup therefore means
-// the previous attempt died mid-build, and the label renderer is used instead.
-static NSString *ds_imgui_arm_path(void) {
-    NSArray<NSString *> *paths = NSSearchPathForDirectoriesInDomains(
-        NSLibraryDirectory, NSUserDomainMask, YES);
-    NSString *library = paths.firstObject;
-    return library.length ? [library stringByAppendingPathComponent:@".darkspeed-imgui.armed"] : nil;
-}
-
-// The panel path is skipped only after repeated unfinished attempts: a single
-// crash must not lock ImGui out forever, but a crash loop must not respring the
-// device on every launch either. Stale markers from older sessions expire.
-static const NSInteger kDSImGuiMaxUnfinishedAttempts = 2;
-static const NSTimeInterval kDSImGuiSuspectWindow = 30 * 60;
-
-static NSInteger ds_imgui_unfinished_count(void) {
-    NSString *path = ds_imgui_arm_path();
-    if (!path.length) return 0;
-    NSString *raw = [NSString stringWithContentsOfFile:path
-                                              encoding:NSUTF8StringEncoding
-                                                 error:nil];
-    return raw.length ? (NSInteger)raw.integerValue : 0;
-}
-
-static BOOL ds_imgui_path_is_suspect(void) {
-    NSString *path = ds_imgui_arm_path();
-    if (!path.length) return NO;
-
-    NSDictionary *attrs = [[NSFileManager defaultManager]
-        attributesOfItemAtPath:path error:nil];
-    if (!attrs) return NO;
-
-    NSDate *modified = attrs[NSFileModificationDate];
-    if (modified && -[modified timeIntervalSinceNow] > kDSImGuiSuspectWindow) {
-        // Stale marker from an older session: not evidence about this one.
-        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-        return NO;
-    }
-
-    NSInteger unfinished = ds_imgui_unfinished_count();
-    if (unfinished < 1) unfinished = 1;
-    return unfinished >= kDSImGuiMaxUnfinishedAttempts;
-}
-
-static void ds_imgui_arm(BOOL armed) {
-    NSString *path = ds_imgui_arm_path();
-    if (!path.length) return;
-    if (armed) {
-        NSInteger unfinished = ds_imgui_unfinished_count() + 1;
-        NSString *text = [NSString stringWithFormat:@"%ld", (long)unfinished];
-        [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    } else {
-        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
-    }
-}
-
-// Remote malloc/free reached through remote_dlsym: the address is resolved in
-// SpringBoard, so the trampoline branches to something valid there.
-static uint64_t ds_remote_malloc(RemoteCall *process, uint64_t size) {
-    if (!process || !process.trojanMem || size == 0) return 0;
-    uint64_t address = 0;
-    if (!remote_dlsym(process, "malloc", &address) || !address) return 0;
-    uint64_t args[1] = {size};
-    return [process doRemoteCallStableWithTimeout:10
-                                      functionName:(char *)"malloc"
-                                   functionPointer:(void *)address
-                                            args:args
-                                        argCount:1];
-}
-
-static void ds_remote_free(RemoteCall *process, uint64_t address) {
-    if (!process || !process.trojanMem || address == 0) return;
-    uint64_t target = 0;
-    if (!remote_dlsym(process, "free", &target) || !target) return;
-    uint64_t args[1] = {address};
-    [process doRemoteCallStableWithTimeout:10
-                               functionName:(char *)"free"
-                            functionPointer:(void *)target
-                                     args:args
-                                 argCount:1];
-}
-
 static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
     NSNumber *value = preferences[HUDUserDefaultsKeyUsesImGuiRenderer];
-    BOOL requested = value ? value.boolValue : YES;
-    if (!requested) return NO;
-
-    // A previous attempt that never completed means this device/build could not
-    // survive the ImGui path. Prefer a working label HUD over another respring.
-    if (ds_imgui_path_is_suspect()) {
-        ds_append_checkpoint(ds_localized(@"Repeated ImGui attempts did not complete; using the label HUD. Clear the kernelcache or reinstall to retry the ImGui renderer."));
-        return NO;
-    }
-    return YES;
+    return value ? value.boolValue : YES;
 }
 
 static float ds_panel_font_size(NSDictionary *preferences) {
@@ -2046,18 +1945,8 @@ static void ds_finish_enable(void) {
     ds_post_progress();
     if (!ds_wait_for_kernel_prefetch(240.0, YES)) {
         NSString *preparationError = DSBridgeLastError();
-        if (preparationError.length == 0) {
-            const char *detail = dlkcache_last_error();
-            if (detail && detail[0]) {
-                preparationError = [NSString stringWithFormat:
-                    ds_localized(@"System data unavailable: %@"),
-                    [NSString stringWithUTF8String:detail]];
-            }
-        }
-        if (preparationError.length == 0) {
-            preparationError = ds_localized(@"System data unavailable: no detail reported. Check network access and retry; if it still fails, reinstall over the existing app.");
-        }
-        ds_fail_enable(preparationError);
+        ds_fail_enable(preparationError.length > 0 ? preparationError :
+            ds_localized(@"Kernelcache download or parsing failed. Network access may still be pending. Check network access and retry; if it still fails, reinstall over the existing app. Restart the device only as a last resort."));
         return;
     }
 
@@ -2098,11 +1987,9 @@ static void ds_finish_enable(void) {
         ds_set_stage(ds_localized(@"Creating SpringBoard HUD"));
         if (ds_imgui_panel_enabled(ds_hud_preferences())) {
             g_imguiPathActive = YES;
-            ds_imgui_arm(YES);
             uint64_t imageView = ds_create_springboard_imgui(g_springBoard);
             if (!imageView) {
                 g_imguiPathActive = NO;
-                ds_imgui_arm(NO);
                 ds_append_checkpoint(ds_localized(@"ImGui panel unavailable; falling back to the label HUD"));
                 ds_set_stage(ds_localized(@"Falling back to the label HUD"));
             } else {
@@ -2130,8 +2017,6 @@ static void ds_finish_enable(void) {
     g_hudActive.store(true);
     g_dsRunning.store(false);
     g_dsProgress.store(1.0);
-    // The ImGui path survived: disarm the crash marker.
-    ds_imgui_arm(NO);
     ds_set_stage(ds_localized(@"SpringBoard HUD started"));
     ds_set_error(@"");
     ds_start_rate_timer();
@@ -2139,21 +2024,6 @@ static void ds_finish_enable(void) {
     notify_post(NOTIFY_LAUNCHED_HUD);
     ds_post_progress();
     os_log(OS_LOG_DEFAULT, "[DSBridge] SpringBoard HUD active (SpringBoard pid=%d)", g_springBoard.pid);
-}
-
-void DSBridgeClearKernelCacheAndRetry(void) {
-    dispatch_async(ds_bridge_queue(), ^{
-        @autoreleasepool {
-            os_log(OS_LOG_DEFAULT, "[DSBridge] clearing cached kernelcache for a retry");
-            clearkerncachedata();
-            clearkernelcachelog();
-            g_kernelPrefetchState.store(0);
-            g_networkWarmupState.store(0);
-            ds_set_error(@"");
-            ds_set_stage(ds_localized(@"Waiting to start"));
-            ds_post_progress();
-        }
-    });
 }
 
 BOOL DSBridgeSetHUDEnabled(BOOL enabled) {

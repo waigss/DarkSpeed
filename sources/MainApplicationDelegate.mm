@@ -76,14 +76,17 @@
     [self.window setRootViewController:_rootViewController];
     [self.window makeKeyAndVisible];
 
+    // Create the ImGui console immediately, as requested. Deferring this by one
+    // runloop turn lets the key window finish its first layout pass, but the
+    // window still appears on the very first screen the user sees.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DSImGuiOverlaySetVisible(YES);
+    });
+
     // Trigger network access immediately and prepare the current build's
     // kernelcache in the sandbox. The privileged chain still starts only when
     // the user enables the HUD.
     DSBridgeWarmUpNetworkAndPrefetchKernelCache();
-
-    // The ImGui console is opened from applicationDidBecomeActive (see below),
-    // not here: building its font atlas is a multi-megabyte allocation and it
-    // needs a live UIWindowScene, neither of which exists this early.
 
     return YES;
 }
@@ -96,11 +99,6 @@
         __strong typeof(weakSelf) strongSelf = weakSelf;
         [strongSelf->_rootViewController reloadMainButtonState];
     });
-
-    // The ImGui console is opened only by an explicit user action (the ImGui
-    // button or darkspeed://imgui). Auto-opening it previously ran overlay
-    // initialisation right after launch and could terminate the app, so nothing
-    // ImGui-related may run unless the user asks for it.
 }
 
 @end

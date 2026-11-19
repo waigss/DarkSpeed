@@ -458,9 +458,6 @@ void DSImGuiHUDUi::BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions
             ImGui::TextWrapped("%s", status.error);
             ImGui::PopStyleColor();
             ImGui::SetItemTooltip("System data: %s", status.error);
-            if (ImGui::Button("Clear kernelcache & retry", ImVec2(-1.0f, 0.0f))) {
-                actions->clearCacheRequested = true;
-            }
         }
         if (!status.hudActive) {
             if (ImGui::Button("Start SpringBoard HUD", ImVec2(210.0f, 0.0f))) {
