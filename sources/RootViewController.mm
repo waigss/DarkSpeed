@@ -56,6 +56,18 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
     _gShouldToggleHUDAfterLaunch = flag;
 }
 
+static BOOL _gImGuiSafeMode = NO;
+
++ (void)setImGuiSafeMode:(BOOL)safeMode
+{
+    _gImGuiSafeMode = safeMode;
+}
+
++ (BOOL)imguiSafeMode
+{
+    return _gImGuiSafeMode;
+}
+
 + (BOOL)shouldToggleHUDAfterLaunch
 {
     return _gShouldToggleHUDAfterLaunch;
@@ -626,8 +638,9 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
     [UIView transitionWithView:self.backgroundView duration:HUD_TRANSITION_DURATION options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
         __strong typeof(weakSelf) strongSelf = weakSelf;
         [strongSelf->_mainButton setTitle:(strongSelf->_isRemoteHUDActive ? NSLocalizedString(@"Exit HUD", nil) : NSLocalizedString(@"Open HUD", nil)) forState:UIControlStateNormal];
-        NSString *bridgeError = DSBridgeCompiledIn() ? DSBridgeLastError() : @"";
-        if (!strongSelf->_isRemoteHUDActive && bridgeError.length > 0) {
+        if ([RootViewController imguiSafeMode]) {
+            [strongSelf->_authorLabel setText:NSLocalizedString(@"ImGui crashed during the last launch. Tap ImGui to retry.", nil)];
+        } else if (!strongSelf->_isRemoteHUDActive && DSBridgeCompiledIn() && DSBridgeLastError().length > 0) {
             [strongSelf->_authorLabel setText:bridgeError];
         } else {
             [strongSelf->_authorLabel setAttributedText:(strongSelf->_isRemoteHUDActive ? hintAttributedString : creditsAttributedString)];
@@ -672,6 +685,12 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
 - (void)tapImGuiButton:(UIButton *)sender
 {
     log_debug(OS_LOG_DEFAULT, "- [RootViewController tapImGuiButton:%{public}@]", sender);
+    if ([RootViewController imguiSafeMode]) {
+        [RootViewController setImGuiSafeMode:NO];
+        DSImGuiOverlaySetVisible(YES);
+        [self reloadMainButtonState];
+        return;
+    }
     DSImGuiOverlaySetVisible(!DSImGuiOverlayIsVisible());
 }
 

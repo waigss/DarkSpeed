@@ -168,6 +168,8 @@ struct DSImGuiOverlayState {
     bool visible = false;
     bool wantsVisible = false;
     bool retryScheduled = false;
+    bool warmedUp = false;
+    bool warmupFailed = false;
     float winMinX = 0;
     float winMinY = 0;
     float winMaxX = 0;
@@ -563,6 +565,28 @@ static void DSImGuiFeedMouse(CGPoint point, bool down) {
 
 #pragma mark - Lifecycle
 
+// Set before the overlay is first touched at launch and cleared once the app
+// UI has appeared. A leftover marker therefore means the previous launch died
+// while ImGui was initialising, and this launch skips ImGui entirely (safe
+// mode) until the user explicitly retries from the main screen.
+static NSString *DSImGuiCrashMarkerPath(void) {
+    return [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES)
+        firstObject stringByAppendingPathComponent:@"DSImGui.launching"];
+}
+
+static BOOL DSImGuiInSafeMode(void) {
+    return [[NSFileManager defaultManager] fileExistsAtPath:DSImGuiCrashMarkerPath()];
+}
+
+static void DSImGuiSetLaunching(BOOL launching) {
+    NSString *path = DSImGuiCrashMarkerPath();
+    if (launching) {
+        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    } else {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    }
+}
+
 static void DSImGuiBreadcrumb(const char *stage) {
     // Appended before each risky step so a hard crash still leaves the last
     // reached stage on disk for the next launch to report.
@@ -625,6 +649,10 @@ static void DSImGuiOverlayTick(CADisplayLink *link) {
 static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible);
 
 void DSImGuiOverlaySetVisible(BOOL visible) {
+    if (visible && DSImGuiInSafeMode()) {
+        DSImGuiSetError(@"ImGui is in safe mode after a crash. Press \"Retry ImGui\" on the main screen.");
+        return;
+    }
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{
             DSImGuiOverlaySetVisible(visible);
@@ -674,10 +702,45 @@ static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
     [NSUserDefaults.standardUserDefaults setBool:NO
                                           forKey:@"darkspeed.imgui.console.closed"];
 
-    DSImGuiBreadcrumb("context");
-    if (!DSImGuiEnsureContextOverlay(state.ctx, 15.0f,
-                                     (float)UIScreen.mainScreen.scale)) {
-        DSImGuiBreadcrumb("context-failed");
+    DSImGuiBreadcrumb("warmup-check");
+    if (!state.warmedUp) {
+        // Context + Metal + atlas are built off the main thread; the window
+        // itself is assembled below without them and renders once warm-up
+        // completes. The app UI is therefore never blocked or killed by this.
+        state.wantsVisible = YES;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            @try {
+                DSImGuiBreadcrumb("warmup-begin");
+                DSImGuiCtx warm;
+                if (!DSImGuiEnsureContextOverlay(warm, 15.0f,
+                                                 (float)UIScreen.mainScreen.scale)) {
+                    DSImGuiBreadcrumb("warmup-failed");
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        OverlayState().warmupFailed = YES;
+                        DSImGuiSetError(DSImGuiLastError());
+                    });
+                    return;
+                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    OverlayState().ctx = warm.ctx;
+                    OverlayState().device = warm.device;
+                    OverlayState().queue = warm.queue;
+                    OverlayState().metalReady = warm.metalReady;
+                    OverlayState().warmedUp = YES;
+                    DSImGuiBreadcrumb("warmup-done");
+                    if (OverlayState().wantsVisible) DSImGuiOverlaySetVisible(YES);
+                });
+            } @catch (...) {
+                DSImGuiBreadcrumb("warmup-exception");
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    OverlayState().warmupFailed = YES;
+                });
+            }
+        });
+        return;
+    }
+    if (state.warmupFailed) {
+        DSImGuiBreadcrumb("warmup-dead");
         return;
     }
 

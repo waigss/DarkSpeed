@@ -76,11 +76,16 @@
     [self.window setRootViewController:_rootViewController];
     [self.window makeKeyAndVisible];
 
-    // Create the ImGui console immediately, as requested. Deferring this by one
-    // runloop turn lets the key window finish its first layout pass, but the
-    // window still appears on the very first screen the user sees.
+    // Create the ImGui console immediately, as requested. The window is
+    // assembled on this turn; its context, Metal device and font atlas warm up
+    // on a background queue, so nothing heavy runs on the launch path. If the
+    // previous launch died during that warm-up, this call is a no-op and the
+    // main screen tells the user how to retry.
+    DSImGuiSetLaunching(YES);
     dispatch_async(dispatch_get_main_queue(), ^{
         DSImGuiOverlaySetVisible(YES);
+        // The UI is up and rendering: ImGui did not kill this launch.
+        [RootViewController setImGuiSafeMode:NO];
     });
 
     // Trigger network access immediately and prepare the current build's
@@ -92,6 +97,8 @@
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
+    // Reaching this callback means the app UI survived this launch.
+    DSImGuiSetLaunching(NO);
     log_debug(OS_LOG_DEFAULT, "- [MainApplicationDelegate applicationDidBecomeActive:%{public}@]", application);
 
     __weak typeof(self) weakSelf = self;
