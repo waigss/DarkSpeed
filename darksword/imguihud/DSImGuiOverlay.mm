@@ -4,8 +4,9 @@
 //
 //  Two renderers built on one ImGui core:
 //    * an interactive overlay window inside the DarkSpeed app (Metal + touches)
-//    * an offscreen panel renderer that returns BGRA pixels for the SpringBoard
-//      HUD, so the remote side never has to run ImGui itself.
+//    * an offscreen panel renderer that draws the compact HUD panel with ImGui
+//      into a Metal texture and hands the pixels back as PNG, so SpringBoard
+//      only has to display an image and never runs ImGui itself.
 //
 
 #import <Foundation/Foundation.h>
@@ -418,9 +419,10 @@ NSData *DSImGuiPanelRenderPNG(float widthPoints, float heightPoints, float scale
 
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)pixels);
+    const CGBitmapInfo bitmapInfo =
+        (CGBitmapInfo)(kCGBitmapByteOrder32Little | (CGBitmapInfo)kCGImageAlphaPremultipliedFirst);
     CGImageRef image = CGImageCreate(widthPx, heightPx, 8, 32, (size_t)widthPx * 4,
-                                     colorSpace,
-                                     kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst,
+                                     colorSpace, bitmapInfo,
                                      provider, NULL, false, kCGRenderingIntentDefault);
     NSData *png = nil;
     if (image) {

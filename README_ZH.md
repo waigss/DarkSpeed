@@ -35,9 +35,58 @@ DarkSpeed 支持 DarkSword 所支持的全部设备。由于 MTE，DarkSpeed 无
 - CH/A 设备弹出提示时，需要允许网络权限。
 - DarkSpeed HUD 启动成功后，请勿关闭或强制结束应用。
 
+
+## ImGui 渲染层
+
+本仓库在原始 DarkSpeed 基础上加了一层 Dear ImGui 渲染管线，两条路径共用同一套 UI 核心：
+
+| 路径 | 位置 | 说明 |
+|---|---|---|
+| 应用内控制台 | `darksword/imguihud/DSImGuiOverlay.mm` | 独立 `UIWindow` + `CAMetalLayer`，`CADisplayLink` 驱动，触摸事件转成 ImGui 鼠标事件，改设置立即写入 `ch.xxtou.hudapp.plist` 并广播 `NOTIFY_RELOAD_HUD` |
+| SpringBoard 悬浮窗 | `darksword/DSImGuiHUDCore.mm` + `DSBridge.mm` | 本进程用 ImGui + Metal 离屏渲染紧凑面板，读回像素编码成 PNG，再由 `RemoteCall` 写入 SpringBoard 内的 `NSData` / `UIImage`，经 `UIImageView` 显示，复用原有的截图隐藏容器 |
+
+UI 核心在 `darksword/imguihud/DSImGuiHUDCore.mm`：偏好读取、接口计数采样、帧率采样、设置窗口、紧凑面板排版都在这里，两条路径共用，不会出现两套数值。
+
+### 打开方式
+
+- 摇一摇 → 「Developer Area」→ **ImGui Console**
+- URL scheme：`darkspeed://imgui`（切换显示/隐藏）
+- 悬浮窗设置里的 **Render the HUD with ImGui** 开关控制 SpringBoard 侧走 ImGui 面板还是原来的 `UILabel`；ImGui 渲染失败时自动回退到 `UILabel`
+
+### 渲染参数
+
+- 面板上下文以设备像素为单位：`DisplaySize` = 像素尺寸，字体图集按 `fontSize * scale` 生成，`DisplayFramebufferScale` 固定 1:1，所以 18pt 的字体在 3x 屏上是 54px 字模，不是放大后的位图
+- 应用内窗口上下文按点工作：图集按 `15pt * scale` 生成，`FontGlobalScale = 1 / scale` 折回点坐标
+- 字体图集包含 Latin + 常用简体中文 + `▼▲↓↑·—…`，找不到 `SFUI.ttf` 时依次回退到 `Core/SFUI.ttf`、`PingFang.ttc`
+
+### 线程约束
+
+Dear ImGui 的当前上下文是进程级全局变量，不是线程安全的。应用内窗口在 main thread 渲染，悬浮窗面板在本进程的 `com.huami.darkspeed.darksword` 串行队列渲染，两者都先取 `g_imguiMutex`（`std::recursive_mutex`，最外层锁固定顺序），再取各自的上下文锁，不会互相踩 `ImGui::SetCurrentContext`。
+
+## 云端编译
+
+`.github/workflows/build-cloud.yml`：`macos-15` + 默认 Xcode，`DARKSPEED_UNSIGNED=1 ./build-darkspeed.sh` 产出未签名 IPA，同时上传完整构建日志与 IPA 的 SHA-256。
+
+```sh
+# 触发
+gh workflow run build-cloud.yml -R <owner>/DarkSpeed
+# 或者 push 到 main 自动触发
+```
+
+产物：`packages/DarkSpeed_1.0-1.ipa`（未签名，需要 TrollStore 或自签后安装）、`packages/DarkSpeed_1.0-1.ipa.sha256`、`packages/DarkSpeed_1.0-1_build.log`。
+
+本地等价命令：
+
+```sh
+chmod +x build-darkspeed.sh get-version.sh
+DARKSPEED_UNSIGNED=1 ./build-darkspeed.sh
+```
+
 ## 构建
 
 本仓库只构建 IPA，不包含越狱插件或 PreferenceBundle 构建目标。
+
+仓库自带两套 CI：`build-cloud.yml`（本改动新增，产未签名 IPA + 日志）与 `build-release.yml`（上游原有，打 tag 时发 release）。本机没有 macOS 时用前者。
 
 在 Xcode 中配置好签名后构建已签名 IPA：
 

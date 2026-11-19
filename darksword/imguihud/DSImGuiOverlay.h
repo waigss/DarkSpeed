@@ -2,8 +2,8 @@
 //  DSImGuiOverlay.h
 //  DarkSpeed
 //
-//  In-app ImGui overlay (Metal) and the offscreen ImGui panel renderer whose
-//  pixels the SpringBoard HUD shows through RemoteCall.
+//  In-app ImGui overlay (Metal) plus the offscreen ImGui panel renderer whose
+//  PNG output is pushed into the SpringBoard HUD by RemoteCall.
 //
 
 #ifndef DSIMGUI_OVERLAY_H
@@ -22,7 +22,7 @@ OBJC_EXTERN void DSImGuiOverlaySetVisible(BOOL visible);
 OBJC_EXTERN BOOL DSImGuiOverlayIsVisible(void);
 
 /// Renders the compact HUD panel with ImGui + Metal at the requested point
-/// size and returns it as PNG data (RGBA, premultiplied alpha). Returns nil and
+/// size and returns it as PNG data (BGRA source, premultiplied alpha). Returns nil and
 /// fills DSImGuiLastError() when the renderer is unavailable.
 OBJC_EXTERN NSData * _Nullable DSImGuiPanelRenderPNG(float widthPoints,
                                                      float heightPoints,

@@ -98,10 +98,10 @@ void DSImGuiHUDUi::LoadPrefs(bool force) {
     _prefs.hideAtSnapshot = DSImGuiBool(stored, HUDUserDefaultsKeyHideAtSnapshot, false);
     _prefs.keepInPlace = DSImGuiBool(stored, HUDUserDefaultsKeyKeepInPlace, false);
     _prefs.useImGuiRenderer = DSImGuiBool(stored, HUDUserDefaultsKeyUsesImGuiRenderer, true);
-    _prefs.modePortrait = DSImGuiInteger(stored, HUDUserDefaultsKeySelectedMode,
-                                         HUDPresetPositionTopCenter);
-    _prefs.modeLandscape = DSImGuiInteger(stored, HUDUserDefaultsKeySelectedModeLandscape,
-                                          HUDPresetPositionTopCenter);
+    _prefs.modePortrait = (int)DSImGuiInteger(stored, HUDUserDefaultsKeySelectedMode,
+                                              HUDPresetPositionTopCenter);
+    _prefs.modeLandscape = (int)DSImGuiInteger(stored, HUDUserDefaultsKeySelectedModeLandscape,
+                                               HUDPresetPositionTopCenter);
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     id customFont = [defaults objectForKey:HUDUserDefaultsKeyUsesCustomFontSize];
@@ -404,12 +404,13 @@ void DSImGuiHUDUi::BuildWindow(const DSImGuiHUDStatus &status, DSImGuiHUDActions
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Surface HUD", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool changed = false;
-        changed |= ImGui::Checkbox("Render with ImGui + IOSurface", &_prefs.useImGuiRenderer);
+        changed |= ImGui::Checkbox("Render the HUD with ImGui", &_prefs.useImGuiRenderer);
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("SpringBoard side: RemoteCall builds a CAMetalLayer, renders the panel\n"
-                              "headlessly into an IOSurface and shows it through a UIImageView.");
+            ImGui::SetTooltip("SpringBoard side: this process renders the panel with ImGui + Metal,\n"
+                              "encodes it as PNG and RemoteCall pushes it into a UIImageView inside\n"
+                              "SpringBoard. Disable to use the plain UILabel renderer.");
         }
         changed |= ImGui::Checkbox("Pass-through", &_prefs.passthroughMode);
         changed |= ImGui::Checkbox("Incoming only", &_prefs.singleLineMode);
