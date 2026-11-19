@@ -726,6 +726,11 @@ static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
                     OverlayState().ctx = warm;
                     OverlayState().warmedUp = YES;
                     DSImGuiBreadcrumb("warmup-done");
+                    // Warm-up survived: this launch is healthy, so the marker
+                    // must not flag the next launch as crashed.
+                    DSImGuiSetLaunching(NO);
+                    [[NSNotificationCenter defaultCenter]
+                        postNotificationName:@"DSImGuiWarmupDidFinish" object:nil];
                     if (OverlayState().wantsVisible) DSImGuiOverlaySetVisible(YES);
                 });
             } @catch (...) {

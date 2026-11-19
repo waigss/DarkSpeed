@@ -81,11 +81,11 @@
     // on a background queue, so nothing heavy runs on the launch path. If the
     // previous launch died during that warm-up, this call is a no-op and the
     // main screen tells the user how to retry.
+    // A leftover marker means the previous launch died inside ImGui warm-up.
+    [RootViewController setImGuiSafeMode:DSImGuiInSafeMode()];
     DSImGuiSetLaunching(YES);
     dispatch_async(dispatch_get_main_queue(), ^{
         DSImGuiOverlaySetVisible(YES);
-        // The UI is up and rendering: ImGui did not kill this launch.
-        [RootViewController setImGuiSafeMode:NO];
     });
 
     // Trigger network access immediately and prepare the current build's
@@ -97,8 +97,8 @@
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-    // Reaching this callback means the app UI survived this launch.
-    DSImGuiSetLaunching(NO);
+    // The warm-up may still be in flight on a background queue, so the marker
+    // is intentionally NOT read or cleared here; warm-up owns that lifecycle.
     log_debug(OS_LOG_DEFAULT, "- [MainApplicationDelegate applicationDidBecomeActive:%{public}@]", application);
 
     __weak typeof(self) weakSelf = self;

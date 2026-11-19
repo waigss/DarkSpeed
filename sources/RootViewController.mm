@@ -85,6 +85,11 @@ static BOOL _gImGuiSafeMode = NO;
 
 - (void)registerNotifications
 {
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(imguiWarmupDidFinish)
+                                                 name:@"DSImGuiWarmupDidFinish"
+                                               object:nil];
+
     int token;
     notify_register_dispatch(NOTIFY_RELOAD_APP, &token, dispatch_get_main_queue(), ^(int token) {
         [self loadUserDefaults:YES];
@@ -682,10 +687,25 @@ static BOOL _gImGuiSafeMode = NO;
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
 }
 
+- (void)imguiWarmupDidFinish
+{
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self imguiWarmupDidFinish];
+        });
+        return;
+    }
+    [RootViewController setImGuiSafeMode:NO];
+    [self reloadMainButtonState];
+}
+
 - (void)tapImGuiButton:(UIButton *)sender
 {
     log_debug(OS_LOG_DEFAULT, "- [RootViewController tapImGuiButton:%{public}@]", sender);
     if ([RootViewController imguiSafeMode]) {
+        // The retry re-arms the launching marker first: if ImGui crashes again,
+        // the next launch lands back in safe mode instead of a dead app.
+        DSImGuiSetLaunching(YES);
         [RootViewController setImGuiSafeMode:NO];
         DSImGuiOverlaySetVisible(YES);
         [self reloadMainButtonState];
