@@ -81,15 +81,9 @@
     // the user enables the HUD.
     DSBridgeWarmUpNetworkAndPrefetchKernelCache();
 
-    // The ImGui console is the primary surface for this build, so open it
-    // automatically until the user closes it once.
-    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    BOOL closedBefore = [defaults boolForKey:@"darkspeed.imgui.console.closed"];
-    if (!closedBefore) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            DSImGuiOverlaySetVisible(YES);
-        });
-    }
+    // The ImGui console is opened from applicationDidBecomeActive (see below),
+    // not here: building its font atlas is a multi-megabyte allocation and it
+    // needs a live UIWindowScene, neither of which exists this early.
 
     return YES;
 }
@@ -102,6 +96,17 @@
         __strong typeof(weakSelf) strongSelf = weakSelf;
         [strongSelf->_rootViewController reloadMainButtonState];
     });
+
+    // Open the ImGui console once the app is actually on screen, so the overlay
+    // has a window scene to attach to. One dispatch hop keeps it off the launch
+    // critical path entirely.
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![defaults boolForKey:@"darkspeed.imgui.console.closed"]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
+                      dispatch_get_main_queue(), ^{
+            DSImGuiOverlaySetVisible(YES);
+        });
+    }
 }
 
 @end

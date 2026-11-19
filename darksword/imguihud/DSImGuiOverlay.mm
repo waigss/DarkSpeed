@@ -166,6 +166,8 @@ struct DSImGuiOverlayState {
     DSImGuiDisplayLinkProxy *proxy = nil;
     double lastTimestamp = 0;
     bool visible = false;
+    bool wantsVisible = false;
+    bool retryScheduled = false;
     float winMinX = 0;
     float winMinY = 0;
     float winMaxX = 0;
@@ -486,14 +488,21 @@ void DSImGuiOverlayRenderFrame(DSImGuiOverlayState &state) {
         state.winMaxY = root->Pos.y + root->Size.y;
     }
 
-    id<MTLCommandBuffer> commandBuffer = [state.ctx.queue commandBuffer];
-    id<MTLRenderCommandEncoder> encoder = [commandBuffer renderCommandEncoderWithDescriptor:pass];
-    if (encoder) {
-        ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, encoder);
-        [encoder endEncoding];
+    if (!drawData || drawData->CmdListsCount <= 0) {
+        // Nothing to draw. Presenting an empty command buffer is harmless, but
+        // skipping the encoder keeps a bad frame from touching the drawable.
+        [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
+    } else {
+        id<MTLRenderCommandEncoder> encoder =
+            [commandBuffer renderCommandEncoderWithDescriptor:pass];
+        if (encoder) {
+            ImGui_ImplMetal_RenderDrawData(drawData, commandBuffer, encoder);
+            [encoder endEncoding];
+        }
+        [commandBuffer presentDrawable:drawable];
+        [commandBuffer commit];
     }
-    [commandBuffer presentDrawable:drawable];
-    [commandBuffer commit];
 
     if (actions.applyRequested) {
         DSImGuiHUDUi::Shared().SavePrefs();
@@ -569,6 +578,8 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
 
     DSImGuiOverlayState &state = OverlayState();
 
+    state.wantsVisible = visible;
+
     if (!visible) {
         [state.link invalidate];
         state.link = nil;
@@ -597,6 +608,21 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
 
     CGRect bounds = scene.coordinateSpace.bounds;
     CGFloat scale = UIScreen.mainScreen.scale;
+    if (scale < 1.0) scale = 1.0;
+
+    // A zero drawable size makes CAMetalLayer create an invalid drawable and
+    // Metal aborts on the next commit. Retry on the next runloop instead.
+    if (bounds.size.width < 1.0 || bounds.size.height < 1.0) {
+        if (!state.retryScheduled) {
+            state.retryScheduled = YES;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                OverlayState().retryScheduled = NO;
+                if (OverlayState().wantsVisible) DSImGuiOverlaySetVisible(YES);
+            });
+        }
+        return;
+    }
 
     if (!state.window) {
         state.window = [[UIWindow alloc] initWithWindowScene:scene];

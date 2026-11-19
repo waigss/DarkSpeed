@@ -290,49 +290,56 @@ void DSImGuiHUDUi::SetupFontAtlas(float pixelSize) {
     io.LogFilename = NULL;
 
     if (pixelSize < 9.0f) pixelSize = 9.0f;
-    if (pixelSize > 64.0f) pixelSize = 64.0f;
+    if (pixelSize > 48.0f) pixelSize = 48.0f;
 
     ImFontConfig base;
-    base.OversampleH = 2;
+    base.OversampleH = 1;
     base.OversampleV = 1;
     base.PixelSnapH = true;
     base.SizePixels = 13.0f;
 
+    // Keep the atlas small enough to build quickly on the main thread. The
+    // full simplified-Chinese set is ~2500 glyphs and becomes a multi-megabyte
+    // texture at HUD sizes, which is far more than the handful of Latin
+    // strings and rate values this console actually renders.
     static ImVector<ImWchar> ranges;
     ranges.clear();
     ImFontGlyphRangesBuilder builder;
     builder.AddRanges(io.Fonts->GetGlyphRangesDefault());
-    builder.AddRanges(io.Fonts->GetGlyphRangesChineseSimplifiedCommon());
-    // Solid triangles, thin arrows, middle dot and the punctuation used by
-    // the HUD strings.
-    builder.AddText("\xE2\x96\xBC\xE2\x96\xB2\xE2\x86\x93\xE2\x86\x91\xC2\xB7\xE2\x80\x94\xE2\x80\xA6");
+    // Solid triangles, thin arrows, middle dot and HUD punctuation.
+    builder.AddText("\xE2\x96\xBC\xE2\x96\xB2\xE2\x86\x93\xE2\x86\x91"
+                    "\xC2\xB7\xE2\x80\x94\xE2\x80\xA6");
     builder.BuildRanges(&ranges);
 
     ImFontConfig scaled = base;
     scaled.SizePixels = pixelSize;
+    const ImWchar *glyphRanges = ranges.Data ? ranges.Data : io.Fonts->GetGlyphRangesDefault();
 
     io.Fonts->Clear();
-    io.Fonts->AddFontDefault(&base);
-    ImFont *font = io.Fonts->AddFontFromFileTTF("/System/Library/Fonts/CoreUI/SFUI.ttf",
-                                                pixelSize, &scaled,
-                                                ranges.Data ? ranges.Data
-                                                            : io.Fonts->GetGlyphRangesDefault());
-    if (!font) {
-        font = io.Fonts->AddFontFromFileTTF("/System/Library/Fonts/Core/SFUI.ttf",
-                                            pixelSize, &scaled,
-                                            ranges.Data ? ranges.Data
-                                                        : io.Fonts->GetGlyphRangesDefault());
-    }
-    if (!font) {
-        font = io.Fonts->AddFontFromFileTTF("/System/Library/Fonts/LanguageSupport/PingFang.ttc",
-                                            pixelSize, &scaled,
-                                            ranges.Data ? ranges.Data
-                                                        : io.Fonts->GetGlyphRangesDefault());
-    }
-    io.Fonts->Build();
+    io.Fonts->TexDesiredWidth = 1024;
 
-    ImFont *primary = io.Fonts->Fonts.Size > 1 ? io.Fonts->Fonts[1] : nullptr;
-    if (primary) io.FontDefault = primary;
+    // Prefer a light system font; the embedded default keeps the atlas working
+    // even if none of these exist on a given iOS build.
+    ImFont *font = io.Fonts->AddFontFromFileTTF(
+        "/System/Library/Fonts/CoreUI/SFUI.ttf", pixelSize, &scaled, glyphRanges);
+    if (!font) {
+        font = io.Fonts->AddFontFromFileTTF(
+            "/System/Library/Fonts/Core/SFUI.ttf", pixelSize, &scaled, glyphRanges);
+    }
+    if (!font) {
+        font = io.Fonts->AddFontDefault(&base);
+    }
+
+    if (!io.Fonts->Build()) {
+        // A partially built atlas would make every glyph lookup fail at draw
+        // time; fall back to the embedded font with a minimal atlas instead.
+        io.Fonts->Clear();
+        io.Fonts->AddFontDefault(&base);
+        io.Fonts->Build();
+    }
+
+    io.FontDefault = (io.Fonts->Fonts.Size > 0) ? io.Fonts->Fonts[0] : nullptr;
+    io.FontGlobalScale = 1.0f;
 }
 
 bool DSImGuiHUDUi::GlyphsAvailable() {
