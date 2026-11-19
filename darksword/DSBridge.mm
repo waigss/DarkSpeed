@@ -18,6 +18,7 @@
 #import <os/log.h>
 
 #include <atomic>
+#include <mach/vm_param.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1113,30 +1114,6 @@ static BOOL ds_apply_snapshot_container(RemoteCall *process, BOOL hideAtSnapshot
 // therefore never runs ImGui, and the remote side keeps the same UIWindow /
 // snapshot-hiding containers as the label path.
 
-static uint64_t ds_remote_malloc(RemoteCall *process, uint64_t size) {
-    if (!process || size == 0) return 0;
-    void *symbol = dlsym(RTLD_DEFAULT, "malloc");
-    if (!symbol) return 0;
-    uint64_t args[1] = {size};
-    return [process doRemoteCallStableWithTimeout:10
-                                      functionName:(char *)"malloc"
-                                   functionPointer:symbol
-                                            args:args
-                                        argCount:1];
-}
-
-static void ds_remote_free(RemoteCall *process, uint64_t address) {
-    if (!process || address == 0) return;
-    void *symbol = dlsym(RTLD_DEFAULT, "free");
-    if (!symbol) return;
-    uint64_t args[1] = {address};
-    [process doRemoteCallStableWithTimeout:10
-                               functionName:(char *)"free"
-                            functionPointer:symbol
-                                     args:args
-                                 argCount:1];
-}
-
 // Marks the ImGui path as "armed" before the remote views are built and only
 // clears it once the HUD is live. A leftover marker at startup therefore means
 // the previous attempt died mid-build, and the label renderer is used instead.
@@ -1147,19 +1124,77 @@ static NSString *ds_imgui_arm_path(void) {
     return library.length ? [library stringByAppendingPathComponent:@".darkspeed-imgui.armed"] : nil;
 }
 
+// The panel path is skipped only after repeated unfinished attempts: a single
+// crash must not lock ImGui out forever, but a crash loop must not respring the
+// device on every launch either. Stale markers from older sessions expire.
+static const NSInteger kDSImGuiMaxUnfinishedAttempts = 2;
+static const NSTimeInterval kDSImGuiSuspectWindow = 30 * 60;
+
+static NSInteger ds_imgui_unfinished_count(void) {
+    NSString *path = ds_imgui_arm_path();
+    if (!path.length) return 0;
+    NSString *raw = [NSString stringWithContentsOfFile:path
+                                              encoding:NSUTF8StringEncoding
+                                                 error:nil];
+    return raw.length ? (NSInteger)raw.integerValue : 0;
+}
+
 static BOOL ds_imgui_path_is_suspect(void) {
     NSString *path = ds_imgui_arm_path();
-    return path.length && [[NSFileManager defaultManager] fileExistsAtPath:path];
+    if (!path.length) return NO;
+
+    NSDictionary *attrs = [[NSFileManager defaultManager]
+        attributesOfItemAtPath:path error:nil];
+    if (!attrs) return NO;
+
+    NSDate *modified = attrs[NSFileModificationDate];
+    if (modified && -[modified timeIntervalSinceNow] > kDSImGuiSuspectWindow) {
+        // Stale marker from an older session: not evidence about this one.
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        return NO;
+    }
+
+    NSInteger unfinished = ds_imgui_unfinished_count();
+    if (unfinished < 1) unfinished = 1;
+    return unfinished >= kDSImGuiMaxUnfinishedAttempts;
 }
 
 static void ds_imgui_arm(BOOL armed) {
     NSString *path = ds_imgui_arm_path();
     if (!path.length) return;
     if (armed) {
-        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSInteger unfinished = ds_imgui_unfinished_count() + 1;
+        NSString *text = [NSString stringWithFormat:@"%ld", (long)unfinished];
+        [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
     } else {
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
     }
+}
+
+// Remote malloc/free reached through remote_dlsym: the address is resolved in
+// SpringBoard, so the trampoline branches to something valid there.
+static uint64_t ds_remote_malloc(RemoteCall *process, uint64_t size) {
+    if (!process || !process.trojanMem || size == 0) return 0;
+    uint64_t address = 0;
+    if (!remote_dlsym(process, "malloc", &address) || !address) return 0;
+    uint64_t args[1] = {size};
+    return [process doRemoteCallStableWithTimeout:10
+                                      functionName:(char *)"malloc"
+                                   functionPointer:(void *)address
+                                            args:args
+                                        argCount:1];
+}
+
+static void ds_remote_free(RemoteCall *process, uint64_t address) {
+    if (!process || !process.trojanMem || address == 0) return;
+    uint64_t target = 0;
+    if (!remote_dlsym(process, "free", &target) || !target) return;
+    uint64_t args[1] = {address};
+    [process doRemoteCallStableWithTimeout:10
+                               functionName:(char *)"free"
+                            functionPointer:(void *)target
+                                     args:args
+                                 argCount:1];
 }
 
 static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
@@ -1170,7 +1205,7 @@ static BOOL ds_imgui_panel_enabled(NSDictionary *preferences) {
     // A previous attempt that never completed means this device/build could not
     // survive the ImGui path. Prefer a working label HUD over another respring.
     if (ds_imgui_path_is_suspect()) {
-        ds_append_checkpoint(ds_localized(@"Previous ImGui attempt did not complete; using the label HUD this time"));
+        ds_append_checkpoint(ds_localized(@"Repeated ImGui attempts did not complete; using the label HUD. Clear the kernelcache or reinstall to retry the ImGui renderer."));
         return NO;
     }
     return YES;
@@ -1224,6 +1259,8 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
         return NO;
     }
 
+    // The panel buffer needs its own allocation: RemoteCall's scratch page is
+    // already carved into argument/return/text slots and is only 16 KB.
     if (!g_remoteImageBuffer || g_remoteImageBufferSize < (uint64_t)png.length) {
         if (g_remoteImageBuffer) ds_remote_free(process, g_remoteImageBuffer);
         g_remoteImageBuffer = ds_remote_malloc(process, (uint64_t)png.length);
@@ -1256,6 +1293,7 @@ static BOOL ds_update_imgui_panel(RemoteCall *process, NSDictionary *preferences
     // exactly what took SpringBoard down.
     uint64_t data = remote_msg(process, dataClass, alloc, 0, 0, 0, 0);
     if (!data) return NO;
+    // initWithBytes:length: copies, so the reusable remote buffer is untouched.
     data = remote_msg(process, data, initWithBytes,
                       g_remoteImageBuffer, (uint64_t)png.length, 0, 0);
     if (!data) {
@@ -1948,11 +1986,6 @@ static void ds_finish_disable(void) {
         } @catch (NSException *exception) {
             os_log_error(OS_LOG_DEFAULT, "[DSBridge] HUD remove exception: %{public}@", exception.reason);
         }
-        if (g_remoteImageBuffer) {
-            // Release the SpringBoard-side PNG scratch page while RemoteCall is
-            // still alive; after destroyRemoteCall the pointer is meaningless.
-            ds_remote_free(process, g_remoteImageBuffer);
-        }
         @try {
             [process destroyRemoteCall];
         } @catch (NSException *exception) {
@@ -1965,6 +1998,11 @@ static void ds_finish_disable(void) {
     g_remoteLabel = 0;
     g_imguiPathActive = NO;
     g_imguiFrameCount = 0;
+    if (process && g_remoteImageBuffer) {
+        // The buffer must be freed before destroyRemoteCall: afterwards the
+        // pointer no longer refers to anything we can reach.
+        ds_remote_free(process, g_remoteImageBuffer);
+    }
     g_remoteImageView = 0;
     g_remoteImageBuffer = 0;
     g_remoteImageBufferSize = 0;

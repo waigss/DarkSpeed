@@ -81,6 +81,16 @@
     // the user enables the HUD.
     DSBridgeWarmUpNetworkAndPrefetchKernelCache();
 
+    // The ImGui console is the primary surface for this build, so open it
+    // automatically until the user closes it once.
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    BOOL closedBefore = [defaults boolForKey:@"darkspeed.imgui.console.closed"];
+    if (!closedBefore) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            DSImGuiOverlaySetVisible(YES);
+        });
+    }
+
     return YES;
 }
 

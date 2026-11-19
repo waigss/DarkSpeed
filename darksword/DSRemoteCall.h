@@ -34,6 +34,7 @@ uint64_t remote_msg(RemoteCall *process, uint64_t object, uint64_t selector,
                     uint64_t argument0, uint64_t argument1,
                     uint64_t argument2, uint64_t argument3);
 uint64_t remote_NSString(RemoteCall *process, const char *string);
+uint64_t remote_dlsym(RemoteCall *process, const char *name, uint64_t *outAddress);
 CGRect remote_getCGRect(RemoteCall *process, uint64_t object, uint64_t selector);
 void remote_setCGRect(RemoteCall *process, uint64_t object, uint64_t selector, CGRect rect);
 #ifdef __cplusplus

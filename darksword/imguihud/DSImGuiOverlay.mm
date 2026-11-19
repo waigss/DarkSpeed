@@ -576,10 +576,15 @@ void DSImGuiOverlaySetVisible(BOOL visible) {
         state.lastTimestamp = 0;
         state.visible = false;
         state.window.hidden = YES;
+        [NSUserDefaults.standardUserDefaults setBool:YES
+                                              forKey:@"darkspeed.imgui.console.closed"];
         return;
     }
 
     if (state.visible) return;
+
+    [NSUserDefaults.standardUserDefaults setBool:NO
+                                          forKey:@"darkspeed.imgui.console.closed"];
 
     if (!DSImGuiEnsureContextOverlay(state.ctx, 15.0f,
                                      (float)UIScreen.mainScreen.scale)) return;

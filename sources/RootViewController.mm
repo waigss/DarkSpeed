@@ -30,6 +30,7 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
     NSMutableDictionary *_userDefaults;
     MainButton *_mainButton;
     UIButton *_settingsButton;
+    UIButton *_imguiButton;
     UIButton *_topLeftButton;
     UIButton *_topRightButton;
     UIButton *_topCenterButton;
@@ -233,6 +234,26 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
         [_settingsButton.centerXAnchor constraintEqualToAnchor:safeArea.centerXAnchor],
         [_settingsButton.widthAnchor constraintEqualToConstant:40.0f],
         [_settingsButton.heightAnchor constraintEqualToConstant:40.0f],
+    ]];
+
+    // Direct entry point: the console used to be reachable only via shake.
+    _imguiButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_imguiButton setTintColor:[UIColor whiteColor]];
+    [_imguiButton addTarget:self action:@selector(tapImGuiButton:) forControlEvents:UIControlEventTouchUpInside];
+    [_imguiButton setTitle:@"ImGui" forState:UIControlStateNormal];
+    [[_imguiButton titleLabel] setFont:[UIFont boldSystemFontOfSize:15.0]];
+    [self.backgroundView addSubview:_imguiButton];
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *config = [UIButtonConfiguration tintedButtonConfiguration];
+        [config setCornerStyle:UIButtonConfigurationCornerStyleLarge];
+        [_imguiButton setConfiguration:config];
+    }
+    [_imguiButton setTranslatesAutoresizingMaskIntoConstraints:NO];
+    [NSLayoutConstraint activateConstraints:@[
+        [_imguiButton.trailingAnchor constraintEqualToAnchor:safeArea.trailingAnchor constant:-20.0f],
+        [_imguiButton.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-20.0f],
+        [_imguiButton.widthAnchor constraintEqualToConstant:72.0f],
+        [_imguiButton.heightAnchor constraintEqualToConstant:40.0f],
     ]];
 
     _authorLabel = [[UILabel alloc] init];
@@ -654,6 +675,12 @@ static const CGFloat _gAuthorLabelBottomConstraintConstantRegular = -80.f;
     [_topRightButton setSelected:(selectedMode == HUDPresetPositionTopRight)];
     UIImage *topCenterImage = (isCenteredMost ? [UIImage systemImageNamed:@"arrow.up.to.line"] : [UIImage systemImageNamed:@"arrow.up"]);
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
+}
+
+- (void)tapImGuiButton:(UIButton *)sender
+{
+    log_debug(OS_LOG_DEFAULT, "- [RootViewController tapImGuiButton:%{public}@]", sender);
+    DSImGuiOverlaySetVisible(!DSImGuiOverlayIsVisible());
 }
 
 - (void)tapAuthorLabel:(UITapGestureRecognizer *)sender
