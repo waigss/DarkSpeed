@@ -33,6 +33,13 @@ OBJC_EXTERN NSData * _Nullable DSImGuiPanelRenderPNG(float widthPoints,
 OBJC_EXTERN BOOL DSImGuiPanelMeasure(float fontSize, float scale,
                                      float *widthPx, float *heightPx);
 
+/// Marks the launch as "ImGui initialising". Cleared once the app UI is up.
+/// A leftover marker puts ImGui into safe mode on the next launch.
+OBJC_EXTERN void DSImGuiSetLaunching(BOOL launching);
+
+/// YES while ImGui is skipped after an unfinished launch.
+OBJC_EXTERN BOOL DSImGuiInSafeMode(void);
+
 /// Last renderer error, empty while the renderers are healthy.
 OBJC_EXTERN NSString *DSImGuiLastError(void);
 

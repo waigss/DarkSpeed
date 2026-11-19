@@ -569,16 +569,16 @@ static void DSImGuiFeedMouse(CGPoint point, bool down) {
 // UI has appeared. A leftover marker therefore means the previous launch died
 // while ImGui was initialising, and this launch skips ImGui entirely (safe
 // mode) until the user explicitly retries from the main screen.
-static NSString *DSImGuiCrashMarkerPath(void) {
+static NSString *DSImGuiCrashMarkerPath(void) {  // file-scope only
     return [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES)
         firstObject stringByAppendingPathComponent:@"DSImGui.launching"];
 }
 
-static BOOL DSImGuiInSafeMode(void) {
+BOOL DSImGuiInSafeMode(void) {
     return [[NSFileManager defaultManager] fileExistsAtPath:DSImGuiCrashMarkerPath()];
 }
 
-static void DSImGuiSetLaunching(BOOL launching) {
+void DSImGuiSetLaunching(BOOL launching) {
     NSString *path = DSImGuiCrashMarkerPath();
     if (launching) {
         [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
