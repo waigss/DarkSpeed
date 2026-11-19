@@ -15,6 +15,7 @@
 #import <net/if.h>
 #import <notify.h>
 #import <os/lock.h>
+#include "darksword.h"
 #import <os/log.h>
 
 #include <atomic>
@@ -39,7 +40,7 @@ static std::atomic_bool g_dsRunning(false);
 static std::atomic_bool g_hudRequested(false);
 static std::atomic_bool g_hudActive(false);
 static std::atomic<double> g_dsProgress(0.0);
-#endif
+
 
 static NSString *ds_localized(NSString *key) {
     return [NSBundle.mainBundle localizedStringForKey:key value:key table:nil];
@@ -57,31 +58,6 @@ static NSString *ds_checkpoint_log_path(void) {
         NSLibraryDirectory, NSUserDomainMask, YES);
     NSString *library = paths.firstObject;
     return library.length ? [library stringByAppendingPathComponent:@"DSBridge.log"] : nil;
-}
-
-// One-line overlay state snapshot in the style of the reference
-// implementation: every flag in one appendable line, so a single checkpoint
-// answers "which step is the overlay in" without reading source.
-static BOOL g_imguiPathActive = NO;   // forward: defined with the panel state
-
-static void ds_overlay_snapshot(const char *reason) {
-    os_log(OS_LOG_DEFAULT,
-           "[DSBridge] overlay enabled=%d compiled=%d ready=%d running=%d "
-           "imgui=%d remote=%d requested=%d reason=%s",
-           g_hudActive.load() ? 1 : 0,
-           DSBridgeCompiledIn() ? 1 : 0,
-           ds_is_ready() ? 1 : 0,
-           g_dsRunning.load() ? 1 : 0,
-           g_imguiPathActive ? 1 : 0,
-           g_springBoard ? 1 : 0,
-           g_hudRequested.load() ? 1 : 0,
-           reason ? reason : "none");
-    ds_append_checkpoint([NSString stringWithFormat:
-        @"overlay enabled=%d imgui=%d remote=%d reason=%s",
-        g_hudActive.load() ? 1 : 0,
-        g_imguiPathActive ? 1 : 0,
-        g_springBoard ? 1 : 0,
-        reason ? reason : "none"]);
 }
 
 static void ds_append_checkpoint(NSString *message) {
@@ -105,6 +81,39 @@ static void ds_append_checkpoint(NSString *message) {
     }
     [handle closeFile];
 }
+
+// The snapshot only reports flags; g_springBoard and the atomics live inside
+// the USE_DARKSWORD block, so keep this helper self-contained instead.
+// One-line overlay state snapshot in the style of the reference
+// implementation: every flag in one appendable line, so a single checkpoint
+// answers "which step is the overlay in" without reading source.
+static BOOL g_imguiPathActive = NO;   // forward: defined with the panel state
+
+#if USE_DARKSWORD
+@class RemoteCall;
+static RemoteCall *g_springBoard = nil;   // forward: real definition below
+
+static void ds_overlay_snapshot(const char *reason) {
+    os_log(OS_LOG_DEFAULT,
+           "[DSBridge] overlay enabled=%d compiled=%d ready=%d running=%d "
+           "imgui=%d remote=%d requested=%d reason=%s",
+           g_hudActive.load() ? 1 : 0,
+           DSBridgeCompiledIn() ? 1 : 0,
+           ds_is_ready() ? 1 : 0,
+           g_dsRunning.load() ? 1 : 0,
+           g_imguiPathActive ? 1 : 0,
+           g_springBoard ? 1 : 0,
+           g_hudRequested.load() ? 1 : 0,
+           reason ? reason : "none");
+    ds_append_checkpoint([NSString stringWithFormat:
+        @"overlay enabled=%d imgui=%d remote=%d reason=%s",
+        g_hudActive.load() ? 1 : 0,
+        g_imguiPathActive ? 1 : 0,
+        g_springBoard ? 1 : 0,
+        reason ? reason : "none"]);
+}
+
+#endif
 
 #if USE_DARKSWORD
 static void ds_set_stage(NSString *stage) {
@@ -157,7 +166,7 @@ static const CACornerMask kDSCornerMaskAll =
     kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner |
     kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
 
-static RemoteCall *g_springBoard = nil;
+
 static uint64_t g_remoteContainer = 0;
 static uint64_t g_remoteBlurView = 0;
 static uint64_t g_remoteBlurEffect = 0;
