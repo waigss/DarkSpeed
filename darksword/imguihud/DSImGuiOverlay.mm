@@ -566,6 +566,23 @@ static void DSImGuiFeedMouse(CGPoint point, bool down) {
 
 #pragma mark - Lifecycle
 
+static void DSImGuiBreadcrumb(const char *stage) {
+    // Appended before each risky step so a hard crash still leaves the last
+    // reached stage on disk for the next launch to report.
+    static NSString *path = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *library = NSSearchPathForDirectoriesInDomains(
+            NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+        if (library.length) {
+            path = [library stringByAppendingPathComponent:@"DSImGui.stage"];
+        }
+    });
+    if (!path) return;
+    NSString *line = [NSString stringWithFormat:@"%s\n", stage ? stage : "?"];
+    [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+
 static void DSImGuiOverlayTick(CADisplayLink *link) {
     @try {
     std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
@@ -606,23 +623,6 @@ static void DSImGuiOverlayTick(CADisplayLink *link) {
         failed.wantsVisible = false;
         if (failed.window) failed.window.hidden = YES;
     }
-}
-
-static void DSImGuiBreadcrumb(const char *stage) {
-    // Appended before each risky step so a hard crash still leaves the last
-    // reached stage on disk for the next launch to report.
-    static NSString *path = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSString *library = NSSearchPathForDirectoriesInDomains(
-            NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
-        if (library.length) {
-            path = [library stringByAppendingPathComponent:@"DSImGui.stage"];
-        }
-    });
-    if (!path) return;
-    NSString *line = [NSString stringWithFormat:@"%s\n", stage ? stage : "?"];
-    [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
 
 static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible);
