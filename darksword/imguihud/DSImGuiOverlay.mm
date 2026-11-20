@@ -730,6 +730,14 @@ static void DSImGuiOverlaySetVisibleUnsafe(BOOL visible) {
             std::lock_guard<std::recursive_mutex> imguiGuard(g_imguiMutex);
             @try {
                 DSImGuiBreadcrumb("warmup-begin");
+                // The previous launch's outcome is now reported; this attempt
+                // owns the marker from here on.
+                DSImGuiSetLaunching(NO);
+
+                // Force the shared UI core to construct HERE, on this thread,
+                // while nothing else reads it. Lazy construction on first use
+                // could otherwise race with the display-link tick.
+                (void)&DSImGuiHUDUi::Shared();
 
                 DSImGuiCtx warm;
                 warm.ctx = ImGui::CreateContext();
